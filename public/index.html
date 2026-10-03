@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time Chat</title>
+    <meta name="description" content="A lightweight, real-time 1-on-1 chat application.">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="background-animation"></div>
+    
+    <div class="chat-container">
+        <header class="chat-header">
+            <div class="status-indicator" id="status-indicator"></div>
+            <h1>Live Chat</h1>
+        </header>
+        
+        <div class="messages-container" id="messages">
+            <!-- Messages will appear here -->
+            <div class="message system-message">
+                Welcome to the live chat. Messages are end-to-end ephemeral.
+            </div>
+        </div>
+        
+        <form class="input-area" id="form" action="">
+            <input id="input" autocomplete="off" placeholder="Type your message..." required />
+            <button class="send-btn" type="submit" aria-label="Send message">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="22" y1="2" x2="11" y2="13"></line>
+                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                </svg>
+            </button>
+        </form>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
