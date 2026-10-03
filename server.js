@@ -47,7 +47,7 @@ io.on('connection', async (socket) => {
         }));
         socket.emit('chat history', history);
     } catch (err) {
-        console.error("Error fetching history", err);
+        console.error("Error fetching history:", err);
     }
 
     // Broadcast incoming messages
@@ -66,7 +66,7 @@ io.on('connection', async (socket) => {
             };
             io.emit('chat message', messageData);
         } catch (err) {
-            console.error("Error saving message", err);
+            console.error("Error saving message:", err);
         }
     });
 
@@ -76,7 +76,7 @@ io.on('connection', async (socket) => {
             await pool.query('DELETE FROM messages WHERE id = $1', [msgId]);
             io.emit('message deleted', msgId);
         } catch (err) {
-            console.error("Error deleting message", err);
+            console.error("Error deleting message:", err);
         }
     });
 

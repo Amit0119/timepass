@@ -66,6 +66,12 @@ function appendMessage(data) {
 socket.on('chat history', (history) => {
     // Clear initial system messages so they aren't duplicated unnecessarily
     messagesContainer.innerHTML = '';
+    
+    const systemMsg = document.createElement('div');
+    systemMsg.classList.add('message', 'system-message');
+    systemMsg.textContent = 'Welcome to the live chat. History is securely stored in PostgreSQL.';
+    messagesContainer.appendChild(systemMsg);
+
     history.forEach(appendMessage);
 });
 
