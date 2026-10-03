@@ -235,3 +235,32 @@ body {
     margin-right: 2px;
     margin-top: 2px;
 }
+
+/* Delete Button Styles */
+.delete-btn {
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.4);
+    cursor: pointer;
+    padding: 4px;
+    margin-left: 8px;
+    border-radius: 50%;
+    transition: color 0.2s, background 0.2s;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    vertical-align: middle;
+}
+
+.delete-btn:hover {
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.1);
+}
+
+@keyframes fadeOut {
+    to {
+        opacity: 0;
+        transform: scale(0.9);
+    }
+}
+
