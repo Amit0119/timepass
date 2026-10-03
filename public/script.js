@@ -8,24 +8,37 @@ const statusIndicator = document.getElementById('status-indicator');
 let currentSocketId = null;
 
 socket.on('connect', () => {
-    statusIndicator.classList.remove('disconnected');
+    console.log('Connected to server');
+    if (statusIndicator) statusIndicator.classList.remove('disconnected');
     currentSocketId = socket.id;
 });
 
-socket.on('disconnect', () => {
-    statusIndicator.classList.add('disconnected');
+socket.on('connect_error', (err) => {
+    console.error("Socket connection error:", err);
+    if (statusIndicator) statusIndicator.classList.add('disconnected');
 });
 
-form.addEventListener('submit', (e) => {
-    e.preventDefault();
-    if (input.value.trim()) {
-        socket.emit('chat message', input.value);
-        input.value = '';
-        input.focus();
-    }
+socket.on('disconnect', (reason) => {
+    console.warn('Disconnected from server:', reason);
+    if (statusIndicator) statusIndicator.classList.add('disconnected');
 });
+
+if (form && input) {
+    form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        if (input.value.trim()) {
+            socket.emit('chat message', input.value);
+            input.value = '';
+            input.focus();
+        }
+    });
+} else {
+    console.error("Form or input element not found in DOM");
+}
 
 function appendMessage(data) {
+    if (!messagesContainer) return;
+
     const isOwnMessage = data.socket_id === currentSocketId;
     
     const messageElement = document.createElement('div');
@@ -64,6 +77,7 @@ function appendMessage(data) {
 }
 
 socket.on('chat history', (history) => {
+    if (!messagesContainer) return;
     // Clear initial system messages so they aren't duplicated unnecessarily
     messagesContainer.innerHTML = '';
     

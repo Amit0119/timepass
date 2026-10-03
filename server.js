@@ -12,29 +12,33 @@ const io = new Server(server, {
 
 let pool;
 try {
-    pool = new Pool({
-        connectionString: process.env.DATABASE_URL,
-        ssl: {
-            rejectUnauthorized: false
-        }
-    });
-    
-    pool.on('error', (err) => {
-        console.error('Unexpected error on idle client', err);
-    });
+    if (process.env.DATABASE_URL) {
+        pool = new Pool({
+            connectionString: process.env.DATABASE_URL,
+            ssl: {
+                rejectUnauthorized: false
+            }
+        });
+        
+        pool.on('error', (err) => {
+            console.error('Unexpected error on idle client', err);
+        });
 
-    pool.query(`
-      CREATE TABLE IF NOT EXISTS messages (
-        id SERIAL PRIMARY KEY,
-        text TEXT,
-        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        socket_id VARCHAR(255)
-      )
-    `).then(() => {
-      console.log("Database table messages ensured.");
-    }).catch(err => {
-      console.error("Error creating table:", err);
-    });
+        pool.query(`
+          CREATE TABLE IF NOT EXISTS messages (
+            id SERIAL PRIMARY KEY,
+            text TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            socket_id VARCHAR(255)
+          )
+        `).then(() => {
+          console.log("Database table messages ensured.");
+        }).catch(err => {
+          console.error("Error creating table:", err);
+        });
+    } else {
+        console.warn("DATABASE_URL is not set. Running in memory-only mode.");
+    }
 } catch (err) {
     console.error("Failed to initialize PostgreSQL pool:", err);
 }
@@ -63,38 +67,46 @@ io.on('connection', async (socket) => {
 
     // Broadcast incoming messages
     socket.on('chat message', async (msg) => {
-        if (!pool) {
-            console.error("Database not connected, cannot save message.");
-            return; 
+        let dbId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        let timestamp = new Date();
+        
+        if (pool) {
+            try {
+                const res = await pool.query(
+                    'INSERT INTO messages (text, socket_id) VALUES ($1, $2) RETURNING id, timestamp',
+                    [msg, socket.id]
+                );
+                const newMsg = res.rows[0];
+                dbId = newMsg.id;
+                timestamp = new Date(newMsg.timestamp);
+            } catch (err) {
+                console.error("Error saving message to DB (falling back to memory):", err);
+            }
+        } else {
+            console.warn("Database not connected, broadcasting without persistence.");
         }
         
-        try {
-            const res = await pool.query(
-                'INSERT INTO messages (text, socket_id) VALUES ($1, $2) RETURNING id, timestamp',
-                [msg, socket.id]
-            );
-            const newMsg = res.rows[0];
-            const messageData = {
-                id: newMsg.id,
-                socket_id: socket.id,
-                text: msg,
-                time: new Date(newMsg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            };
-            io.emit('chat message', messageData);
-        } catch (err) {
-            console.error("Error saving message:", err);
-        }
+        // Critical: Always broadcast so the chat doesn't break if the DB fails
+        const messageData = {
+            id: dbId,
+            socket_id: socket.id,
+            text: msg,
+            time: timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        };
+        io.emit('chat message', messageData);
     });
 
     // Handle delete
     socket.on('delete message', async (msgId) => {
-        if (!pool) return;
-        try {
-            await pool.query('DELETE FROM messages WHERE id = $1', [msgId]);
-            io.emit('message deleted', msgId);
-        } catch (err) {
-            console.error("Error deleting message:", err);
+        if (pool && !String(msgId).startsWith('temp-')) {
+            try {
+                await pool.query('DELETE FROM messages WHERE id = $1', [msgId]);
+            } catch (err) {
+                console.error("Error deleting message from DB:", err);
+            }
         }
+        // Always broadcast delete so UI can sync, even if DB fails or it was a temp message
+        io.emit('message deleted', msgId);
     });
 
     socket.on('disconnect', () => {
