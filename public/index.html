@@ -1,320 +1,248 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Real-Time Chat & Friends Calling</title>
-    <meta name="description" content="A real-time chat application with Instagram-style friend system and WebRTC video/audio calling.">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Private Space 💜</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-    <div class="background-animation"></div>
-    
-    <!-- ==================== AUTHENTICATION SCREEN ==================== -->
-    <div class="auth-container" id="auth-container">
-        <div class="auth-card">
-            <div class="auth-header">
-                <div class="auth-icon">
-                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-                    </svg>
-                </div>
-                <h1 id="auth-title">Welcome Back</h1>
-                <p id="auth-subtitle">Sign in to connect and call your friends</p>
-            </div>
 
-            <div class="auth-tabs" role="tablist">
-                <button type="button" class="auth-tab active" id="tab-login" role="tab" aria-selected="true">Sign In</button>
-                <button type="button" class="auth-tab" id="tab-register" role="tab" aria-selected="false">Register</button>
-            </div>
+  <!-- ================= AUTHENTICATION SCREEN ================= -->
+  <div id="auth-container" class="auth-wrapper">
+    <div class="auth-card">
+      <div class="auth-brand">
+        <div class="brand-logo">💜</div>
+        <h1>Private Space</h1>
+        <p>Exclusive 2-Person Chat & Audio/Video Calling</p>
+      </div>
 
-            <form class="auth-form" id="auth-form" autocomplete="off">
-                <div class="form-group">
-                    <label for="auth-username">Username</label>
-                    <div class="input-wrapper">
-                        <svg class="input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                            <circle cx="12" cy="7" r="4"></circle>
-                        </svg>
-                        <input type="text" id="auth-username" placeholder="Choose or enter username" required autocomplete="username" />
-                    </div>
-                </div>
+      <div class="auth-tabs">
+        <button type="button" id="tab-login" class="auth-tab active">Sign In</button>
+        <button type="button" id="tab-register" class="auth-tab">Register</button>
+      </div>
 
-                <div class="form-group">
-                    <label for="auth-password">Password</label>
-                    <div class="input-wrapper password-wrapper">
-                        <svg class="input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-                        </svg>
-                        <input type="password" id="auth-password" placeholder="Enter password (min 6 characters)" required autocomplete="current-password" />
-                        <button type="button" class="toggle-password-btn" id="toggle-password-btn" title="Toggle password visibility" aria-label="Toggle password visibility">
-                            <!-- Eye Open SVG (shown when password is hidden) -->
-                            <svg class="eye-icon eye-open" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                                <circle cx="12" cy="12" r="3"></circle>
-                            </svg>
-                            <!-- Eye Closed SVG (shown when password is visible) -->
-                            <svg class="eye-icon eye-closed" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: none;">
-                                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
-                                <line x1="1" y1="1" x2="23" y2="23"></line>
-                            </svg>
-                        </button>
-                    </div>
-                </div>
+      <div id="auth-feedback" class="auth-feedback" style="display: none;"></div>
 
-                <div class="auth-feedback" id="auth-feedback" style="display: none;"></div>
-
-                <button type="submit" class="auth-submit-btn" id="auth-submit-btn">
-                    <span>Sign In</span>
-                </button>
-            </form>
-
-            <div class="auth-switch">
-                <span id="auth-switch-text">Don't have an account?</span>
-                <button type="button" class="switch-link" id="auth-switch-btn">Create one</button>
-            </div>
+      <form id="auth-form" autocomplete="off">
+        <div class="input-group">
+          <label for="auth-username">Username</label>
+          <div class="input-box">
+            <span class="input-icon">👤</span>
+            <input type="text" id="auth-username" placeholder="Enter your name" required maxlength="30" />
+          </div>
         </div>
-    </div>
 
-    <!-- ==================== MAIN CHAT CONTAINER ==================== -->
-    <div class="chat-container" id="chat-container" style="display: none;">
-        <!-- Top App Bar -->
-        <header class="chat-header">
-            <div class="header-left">
-                <button class="sidebar-collapse-btn" id="sidebar-collapse-btn" title="Toggle Sidebar" aria-label="Toggle Sidebar">
-                    <svg class="sidebar-toggle-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                        <line x1="9" y1="3" x2="9" y2="21"></line>
-                    </svg>
-                </button>
-                <div class="status-indicator" id="status-indicator" title="Connected"></div>
-                <div class="chat-header-text-group">
-                    <h2 id="chat-header-title">Live Chat</h2>
-                    <span class="chat-status-text" id="chat-status-text">Select a friend to message</span>
-                </div>
-            </div>
-            
-            <div class="header-right">
-                <button class="toggle-users-btn" id="toggle-users-btn" title="Toggle Sidebar">
-                    <span>👥 Friends</span>
-                    <span class="badge" id="requests-header-badge" style="display: none;">0</span>
-                </button>
-                <div class="user-badge" id="user-badge">
-                    <span class="user-avatar-dot"></span>
-                    <span class="user-name" id="current-user-display">User</span>
-                </div>
-                <button class="logout-btn" id="logout-btn" title="Sign Out" aria-label="Sign out">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-                        <polyline points="16 17 21 12 16 7"></polyline>
-                        <line x1="21" y1="12" x2="9" y2="12"></line>
-                    </svg>
-                    <span>Logout</span>
-                </button>
-            </div>
-        </header>
-
-        <!-- Main Body: Friends Sidebar + Chat Messages -->
-        <div class="chat-body-layout">
-            <!-- Mobile Drawer Backdrop Overlay -->
-            <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
-
-            <!-- Instagram-Style Friends Sidebar with 3 Compact Tabs -->
-            <aside class="users-sidebar" id="users-sidebar">
-                <!-- Sidebar Tabs Header -->
-                <div class="sidebar-tabs-bar">
-                    <button type="button" class="sidebar-tab active" id="tab-sidebar-friends" title="Friends List">
-                        <span>Friends</span>
-                        <span class="tab-count-badge" id="friends-count-badge">0</span>
-                    </button>
-                    <button type="button" class="sidebar-tab" id="tab-sidebar-requests" title="Pending Requests">
-                        <span>Requests</span>
-                        <span class="tab-count-badge badge-alert" id="requests-badge-count" style="display: none;">0</span>
-                    </button>
-                    <button type="button" class="sidebar-tab" id="tab-sidebar-find" title="Find and Add Users">
-                        <span>Find</span>
-                    </button>
-                    <button type="button" class="sidebar-close-btn" id="sidebar-close-btn" title="Close Sidebar" aria-label="Close sidebar">✕</button>
-                </div>
-
-                <!-- Tab 1: Friends List Pane -->
-                <div class="sidebar-pane active-pane" id="pane-friends">
-                    <div class="friends-list" id="friends-list">
-                        <!-- Populated dynamically with accepted friends, online status, and 📞 / 📹 buttons -->
-                        <div class="sidebar-empty-state">
-                            <p>No friends added yet.</p>
-                            <button type="button" class="empty-action-btn" id="goto-find-btn">Find Users</button>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Tab 2: Pending Requests Pane -->
-                <div class="sidebar-pane" id="pane-requests" style="display: none;">
-                    <div class="requests-list" id="requests-list">
-                        <!-- Populated dynamically with incoming friend requests & ✅/❌ buttons -->
-                        <div class="sidebar-empty-state">
-                            <p>No pending friend requests.</p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Tab 3: Find / Add Users Pane -->
-                <div class="sidebar-pane" id="pane-find" style="display: none;">
-                    <div class="search-box-wrapper">
-                        <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <circle cx="11" cy="11" r="8"></circle>
-                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                        </svg>
-                        <input type="text" id="find-users-input" placeholder="Search registered users..." autocomplete="off" />
-                    </div>
-                    <div class="find-users-list" id="find-users-list">
-                        <!-- Populated dynamically with search results and '➕ Add / Follow' buttons -->
-                    </div>
-                </div>
-            </aside>
-
-            <!-- Chat Messages Column -->
-            <section class="chat-messages-section">
-                <div class="messages-container" id="messages">
-                    <div class="empty-chat-state" id="empty-chat-state">
-                        <div class="empty-chat-icon">💬</div>
-                        <h3>Select a Friend</h3>
-                        <p>Choose an accepted friend from the sidebar to open your private conversation.</p>
-                    </div>
-                </div>
-                
-                <form class="input-area" id="form" action="">
-                    <input id="input" autocomplete="off" placeholder="Select a friend to message..." disabled required />
-                    <button class="send-btn" id="send-btn" type="submit" disabled aria-label="Send message">
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <line x1="22" y1="2" x2="11" y2="13"></line>
-                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                        </svg>
-                    </button>
-                </form>
-            </section>
+        <div class="input-group">
+          <label for="auth-password">Password</label>
+          <div class="input-box">
+            <span class="input-icon">🔒</span>
+            <input type="password" id="auth-password" placeholder="Minimum 6 characters" required minlength="6" />
+            <button type="button" id="toggle-password" class="eye-btn" aria-label="Toggle password visibility">
+              <!-- Eye Open SVG -->
+              <svg id="eye-open" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+              </svg>
+              <!-- Eye Closed SVG -->
+              <svg id="eye-closed" style="display:none;" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                <line x1="1" y1="1" x2="23" y2="23"></line>
+              </svg>
+            </button>
+          </div>
         </div>
+
+        <button type="submit" id="auth-submit-btn" class="primary-btn">Sign In</button>
+      </form>
     </div>
+  </div>
 
-    <!-- ==================== WEBRTC VIDEO / AUDIO CALL MODAL ==================== -->
-    <div class="call-modal" id="call-modal" style="display: none;">
-        <div class="call-modal-content">
-            <!-- Call Header Bar -->
-            <div class="call-header-bar">
-                <div class="call-peer-info">
-                    <span class="call-type-icon" id="call-type-indicator">📹</span>
-                    <span class="call-peer-name" id="call-peer-name">In Call</span>
-                    <span class="call-timer-badge" id="call-timer">00:00</span>
-                </div>
-            </div>
+  <!-- ================= MAIN CHAT & CALL APPLICATION ================= -->
+  <div id="chat-container" class="app-layout" style="display: none;">
 
-            <!-- Video Stage Area -->
-            <div class="video-stage" id="video-stage">
-                <!-- Remote Video -->
-                <video id="remote-video" autoplay playsinline></video>
-                
-                <!-- Audio-Only Placeholder for Remote Peer -->
-                <div class="audio-avatar-placeholder" id="remote-audio-placeholder" style="display: none;">
-                    <div class="pulsing-avatar" id="remote-avatar-initial">U</div>
-                    <p id="remote-placeholder-text">Audio Call in Progress</p>
-                </div>
+    <!-- Mobile Backdrop Overlay -->
+    <div id="sidebar-backdrop" class="sidebar-backdrop"></div>
 
-                <!-- Local Video Picture-in-Picture -->
-                <div class="local-video-container" id="local-video-container">
-                    <video id="local-video" muted autoplay playsinline></video>
-                    <div class="local-cam-off-badge" id="local-cam-off-badge" style="display: none;">
-                        <span>📷 Off</span>
-                    </div>
-                </div>
-            </div>
-
-            <!-- In-Call Floating Controls Bar -->
-            <div class="call-controls-bar">
-                <!-- Toggle Mic -->
-                <button class="ctrl-btn" id="mic-toggle-btn" title="Mute Microphone" aria-label="Mute Microphone">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                        <line x1="12" y1="19" x2="12" y2="23"></line>
-                        <line x1="8" y1="23" x2="16" y2="23"></line>
-                    </svg>
-                </button>
-
-                <!-- Toggle Camera -->
-                <button class="ctrl-btn" id="cam-toggle-btn" title="Toggle Camera" aria-label="Toggle Camera">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <polygon points="23 7 16 12 23 17 23 7"></polygon>
-                        <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
-                    </svg>
-                </button>
-
-                <!-- End Call Button -->
-                <button class="ctrl-btn end-call-btn" id="end-call-btn" title="End Call" aria-label="End Call">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-6-6 19.8 19.8 0 0 1-3.12-8.69 2 2 0 0 1 2-2.18h3a2 2 0 0 1 2 1.72 12.81 12.81 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.09 9.91"></path>
-                        <line x1="23" y1="1" x2="1" y2="23"></line>
-                    </svg>
-                </button>
-            </div>
+    <!-- Left Sidebar / Slide-Out Mobile Drawer -->
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-header">
+        <div class="my-profile">
+          <div id="my-avatar" class="avatar-circle">A</div>
+          <div class="my-info">
+            <span id="my-username" class="my-name">User</span>
+            <span class="my-status"><span class="dot-online"></span> Active Now</span>
+          </div>
         </div>
-    </div>
-
-    <!-- ==================== INCOMING CALL OVERLAY ==================== -->
-    <div class="call-overlay incoming-overlay" id="incoming-call-overlay" style="display: none;">
-        <div class="call-alert-card">
-            <div class="caller-avatar-wave">
-                <div class="ring ring-1"></div>
-                <div class="ring ring-2"></div>
-                <div class="caller-avatar" id="incoming-caller-avatar">U</div>
-            </div>
-            <h3 id="incoming-caller-name">Friend is calling...</h3>
-            <p class="call-type-badge" id="incoming-call-type">📹 Video Call</p>
-            <div class="incoming-actions">
-                <button class="call-btn accept-btn" id="accept-call-btn" title="Accept Call">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
-                    </svg>
-                    <span>Accept</span>
-                </button>
-                <button class="call-btn decline-btn" id="decline-call-btn" title="Decline Call">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <line x1="18" y1="6" x2="6" y2="18"></line>
-                        <line x1="6" y1="6" x2="18" y2="18"></line>
-                    </svg>
-                    <span>Decline</span>
-                </button>
-            </div>
+        <div class="sidebar-header-actions">
+          <button type="button" id="logout-btn" class="icon-btn danger-btn" title="Logout">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+              <polyline points="16 17 21 12 16 7"></polyline>
+              <line x1="21" y1="12" x2="9" y2="12"></line>
+            </svg>
+          </button>
+          <button type="button" id="close-sidebar-btn" class="icon-btn mobile-only" title="Close Menu">✕</button>
         </div>
-    </div>
+      </div>
 
-    <!-- ==================== OUTGOING CALL OVERLAY ==================== -->
-    <div class="call-overlay outgoing-overlay" id="outgoing-call-overlay" style="display: none;">
-        <div class="call-alert-card">
-            <div class="caller-avatar-wave">
-                <div class="ring ring-1"></div>
-                <div class="ring ring-2"></div>
-                <div class="caller-avatar" id="outgoing-peer-avatar">U</div>
-            </div>
-            <h3 id="outgoing-peer-name">Calling Friend...</h3>
-            <p class="call-type-badge" id="outgoing-call-type">📹 Video Call • Ringing...</p>
-            <div class="outgoing-actions">
-                <button class="call-btn decline-btn" id="cancel-outgoing-call-btn" title="Cancel Call">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <line x1="18" y1="6" x2="6" y2="18"></line>
-                        <line x1="6" y1="6" x2="18" y2="18"></line>
-                    </svg>
-                    <span>Cancel</span>
-                </button>
-            </div>
+      <!-- 3 Social Tabs -->
+      <div class="sidebar-tabs">
+        <button type="button" class="side-tab active" data-tab="friends">
+          Friends <span id="badge-friends" class="tab-badge">0</span>
+        </button>
+        <button type="button" class="side-tab" data-tab="requests">
+          Requests <span id="badge-requests" class="tab-badge alert" style="display:none;">0</span>
+        </button>
+        <button type="button" class="side-tab" data-tab="find">
+          Find
+        </button>
+      </div>
+
+      <!-- Tab Panels -->
+      <div class="sidebar-body">
+        <div id="panel-friends" class="tab-panel active">
+          <div id="friends-list" class="user-list"></div>
         </div>
+        <div id="panel-requests" class="tab-panel">
+          <div id="requests-list" class="user-list"></div>
+        </div>
+        <div id="panel-find" class="tab-panel">
+          <div id="find-list" class="user-list"></div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Chat View -->
+    <main class="chat-main">
+      <!-- Responsive Single-Line Top Header -->
+      <header class="chat-header">
+        <div class="header-left">
+          <button type="button" id="toggle-sidebar-btn" class="menu-toggle-btn" title="Toggle Friends Menu">
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="3" y1="12" x2="21" y2="12"></line>
+              <line x1="3" y1="6" x2="21" y2="6"></line>
+              <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+            <span id="mobile-req-dot" class="notif-dot" style="display:none;"></span>
+          </button>
+
+          <div id="active-friend-header" class="active-friend-info">
+            <div id="header-avatar" class="avatar-circle small">💜</div>
+            <div class="header-text">
+              <h2 id="header-title">Welcome meri pyari moti</h2>
+              <p id="header-subtitle">Select friend to chat & call</p>
+            </div>
+          </div>
+        </div>
+
+        <div id="header-call-actions" class="header-right" style="display: none;">
+          <button type="button" id="header-voice-btn" class="call-action-btn voice" title="Voice Call">📞</button>
+          <button type="button" id="header-video-btn" class="call-action-btn video" title="Video Call">📹</button>
+        </div>
+      </header>
+
+      <!-- Always-visible Romantic Welcome Pill -->
+      <div class="welcome-banner">
+        <span>✨ Welcome meri pyari moti ✨</span>
+      </div>
+
+      <!-- Messages Scroll Container -->
+      <div id="messages-container" class="messages-container">
+        <!-- Empty State before selecting a friend -->
+        <div id="empty-chat-state" class="empty-chat-state">
+          <div class="empty-icon">💌</div>
+          <h3>Welcome meri pyari moti</h3>
+          <p>Apne friend ko add/select karo private 1-on-1 chat aur video call ke liye.</p>
+          <button type="button" id="empty-open-menu-btn" class="secondary-btn">👥 Open Friends Menu</button>
+        </div>
+
+        <!-- Messages List -->
+        <ul id="messages" class="messages-list"></ul>
+      </div>
+
+      <!-- Bottom Input Bar -->
+      <form id="chat-form" class="chat-input-bar">
+        <input
+          type="text"
+          id="message-input"
+          placeholder="Select a friend first..."
+          autocomplete="off"
+          disabled
+        />
+        <button type="submit" id="send-btn" class="send-btn" disabled aria-label="Send Message">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+        </button>
+      </form>
+    </main>
+  </div>
+
+  <!-- ================= INCOMING CALL OVERLAY ================= -->
+  <div id="incoming-call-overlay" class="call-overlay" style="display: none;">
+    <div class="call-dialog">
+      <div class="radar-avatar">
+        <span id="incoming-caller-avatar">U</span>
+      </div>
+      <h3 id="incoming-caller-name">Friend is calling...</h3>
+      <p id="incoming-call-type">Incoming Video Call</p>
+      <div class="call-dialog-actions">
+        <button type="button" id="decline-call-btn" class="call-round-btn decline" title="Decline">✕</button>
+        <button type="button" id="accept-call-btn" class="call-round-btn accept" title="Accept">📞</button>
+      </div>
     </div>
+  </div>
 
-    <!-- Toast Notifications -->
-    <div class="toast-container" id="toast-container"></div>
+  <!-- ================= OUTGOING CALL OVERLAY ================= -->
+  <div id="outgoing-call-overlay" class="call-overlay" style="display: none;">
+    <div class="call-dialog">
+      <div class="radar-avatar">
+        <span id="outgoing-callee-avatar">U</span>
+      </div>
+      <h3 id="outgoing-callee-name">Calling...</h3>
+      <p>Ringing on their device...</p>
+      <div class="call-dialog-actions">
+        <button type="button" id="cancel-call-btn" class="call-round-btn decline" title="Cancel Call">✕</button>
+      </div>
+    </div>
+  </div>
 
-    <script src="/socket.io/socket.io.js"></script>
-    <script src="script.js"></script>
+  <!-- ================= ACTIVE WEBRTC CALL MODAL ================= -->
+  <div id="call-modal" class="active-call-modal" style="display: none;">
+    <div class="video-stage">
+      <video id="remote-video" autoplay playsinline></video>
+
+      <!-- Fallback Avatar when in Voice Call -->
+      <div id="audio-call-placeholder" class="audio-placeholder" style="display: none;">
+        <div class="radar-avatar large">
+          <span id="active-call-avatar">U</span>
+        </div>
+        <h3 id="active-call-username">Connected</h3>
+      </div>
+
+      <!-- Top Call Info Pill -->
+      <div class="call-top-bar">
+        <span class="dot-online"></span>
+        <span id="call-timer">00:00</span>
+      </div>
+
+      <!-- Floating Local Camera PiP -->
+      <div id="local-video-wrap" class="local-video-pip">
+        <video id="local-video" muted autoplay playsinline></video>
+      </div>
+
+      <!-- Bottom Call Controls -->
+      <div class="call-controls-bar">
+        <button type="button" id="toggle-mic-btn" class="ctrl-btn" title="Mute/Unmute Mic">🎤</button>
+        <button type="button" id="toggle-cam-btn" class="ctrl-btn" title="Camera On/Off">📷</button>
+        <button type="button" id="end-call-btn" class="ctrl-btn end-call" title="End Call">🛑</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="script.js"></script>
 </body>
 </html>
