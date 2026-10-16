@@ -224,16 +224,23 @@ function connectSocket() {
   });
 
   socket.on('private-chat-history', ({ friend, messages }) => {
-    if (friend !== activeFriend) return;
+    if (!activeFriend || (friend || '').toLowerCase() !== activeFriend.toLowerCase()) return;
     messagesList.innerHTML = '';
-    messages.forEach(msg => appendMessage(msg));
+    (messages || []).forEach(msg => appendMessage(msg));
     scrollToBottom();
   });
 
   socket.on('private-message', (msg) => {
+    if (!currentUser || !activeFriend || !msg) return;
+    const sender = (msg.username || '').toLowerCase();
+    const recipient = (msg.recipient || '').toLowerCase();
+    const me = currentUser.toLowerCase();
+    const friend = activeFriend.toLowerCase();
+
+    // Strict 1-on-1 Chat Isolation: message must belong strictly to this active pair
     const isRelevant =
-      (msg.username === currentUser && msg.recipient === activeFriend) ||
-      (msg.username === activeFriend && msg.recipient === currentUser);
+      (sender === me && recipient === friend) ||
+      (sender === friend && recipient === me);
 
     if (isRelevant) {
       appendMessage(msg);
@@ -392,6 +399,9 @@ function selectFriend(friendName) {
   sendBtn.disabled = false;
   messageInput.placeholder = `Message ${friendName}...`;
 
+  // Immediately clear chat to maintain absolute privacy between friends
+  messagesList.innerHTML = '';
+
   updateActiveFriendHeader();
   renderSocialLists();
   socket.emit('load-private-chat', { friend: friendName });
@@ -399,7 +409,7 @@ function selectFriend(friendName) {
 
 function updateActiveFriendHeader() {
   if (!activeFriend) return;
-  const friendObj = socialState.friends.find(f => f.username === activeFriend);
+  const friendObj = socialState.friends.find(f => (f.username || '').toLowerCase() === activeFriend.toLowerCase());
   const isOnline = friendObj ? friendObj.online : false;
 
   headerAvatar.textContent = activeFriend.charAt(0).toUpperCase();
@@ -427,12 +437,13 @@ chatForm.addEventListener('submit', (e) => {
 });
 
 function appendMessage(msg) {
-  if (document.querySelector(`.msg-row[data-id="${msg.id}"]`)) return;
+  if (!msg || !msg.text) return;
+  if (msg.id && document.querySelector(`.msg-row[data-id="${msg.id}"]`)) return;
 
-  const isMine = msg.username === currentUser;
+  const isMine = (msg.username || '').toLowerCase() === (currentUser || '').toLowerCase();
   const li = document.createElement('li');
   li.className = `msg-row ${isMine ? 'mine' : 'theirs'}`;
-  li.dataset.id = msg.id;
+  if (msg.id) li.dataset.id = msg.id;
 
   const time = msg.created_at
     ? new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -446,7 +457,7 @@ function appendMessage(msg) {
     </div>
   `;
 
-  if (isMine) {
+  if (isMine && msg.id) {
     li.querySelector('.delete-msg-btn').addEventListener('click', () => {
       socket.emit('delete-message', { id: msg.id, friend: activeFriend });
     });
@@ -462,7 +473,7 @@ function scrollToBottom() {
 // ================= WEBRTC AUDIO & VIDEO CALLING =================
 
 async function startCall(targetUser, videoEnabled) {
-  const friendObj = socialState.friends.find(f => f.username === targetUser);
+  const friendObj = socialState.friends.find(f => (f.username || '').toLowerCase() === targetUser.toLowerCase());
   if (!friendObj || !friendObj.online) {
     alert(`${targetUser} is currently offline.`);
     return;

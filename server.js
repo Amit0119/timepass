@@ -64,13 +64,16 @@ async function initDB() {
       );
     `);
 
-    // Ensure columns exist if upgrading from older table schema
+    // Ensure columns exist for seamless schema backward-compatibility
     await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS username VARCHAR(50);`);
     await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS recipient VARCHAR(50);`);
+    await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;`);
 
-    // Auto-clean old public/anonymous messages that have no private recipient
-    await pool.query(`DELETE FROM messages WHERE username = 'Anonymous' OR username IS NULL OR recipient IS NULL;`);
-    console.log('PostgreSQL initialized and old public messages cleaned.');
+    // Safely backfill legacy columns if they exist (without deleting anything)
+    await pool.query(`UPDATE messages SET created_at = timestamp WHERE created_at IS NULL AND timestamp IS NOT NULL;`).catch(() => {});
+    await pool.query(`UPDATE messages SET recipient = receiver WHERE recipient IS NULL AND receiver IS NOT NULL;`).catch(() => {});
+
+    console.log('PostgreSQL schema verified and ready. User data and messages are preserved.');
   } catch (err) {
     console.error('Database initialization error:', err);
   }
@@ -159,16 +162,21 @@ app.post('/login', async (req, res) => {
 
 // ================= HELPER FUNCTIONS FOR SOCIAL & CHAT =================
 
-// Map: username -> Set of socket IDs
+// Map: lowercase username -> Set of socket IDs
 const userSockets = new Map();
 
+function getUserSocketSet(username) {
+  if (!username) return null;
+  return userSockets.get(username.toLowerCase()) || null;
+}
+
 function isUserOnline(username) {
-  const set = userSockets.get(username);
+  const set = getUserSocketSet(username);
   return Boolean(set && set.size > 0);
 }
 
 function emitToUser(username, event, payload) {
-  const set = userSockets.get(username);
+  const set = getUserSocketSet(username);
   if (set) {
     for (const sockId of set) {
       io.to(sockId).emit(event, payload);
@@ -181,17 +189,18 @@ async function getSocialDataForUser(username) {
   let relations = [];
 
   if (useDB) {
-    const uRes = await pool.query('SELECT username FROM users WHERE username != $1', [username]);
+    const uRes = await pool.query('SELECT username FROM users WHERE LOWER(username) != LOWER($1)', [username]);
     allUsers = uRes.rows.map(r => r.username);
 
     const fRes = await pool.query(
-      'SELECT requester, recipient, status FROM friendships WHERE requester = $1 OR recipient = $1',
+      'SELECT requester, recipient, status FROM friendships WHERE LOWER(requester) = LOWER($1) OR LOWER(recipient) = LOWER($1)',
       [username]
     );
     relations = fRes.rows;
   } else {
-    allUsers = memoryUsers.filter(u => u.username !== username).map(u => u.username);
-    relations = memoryFriendships.filter(f => f.requester === username || f.recipient === username);
+    const uLower = username.toLowerCase();
+    allUsers = memoryUsers.filter(u => u.username.toLowerCase() !== uLower).map(u => u.username);
+    relations = memoryFriendships.filter(f => f.requester.toLowerCase() === uLower || f.recipient.toLowerCase() === uLower);
   }
 
   const friends = [];
@@ -199,9 +208,11 @@ async function getSocialDataForUser(username) {
   const discover = [];
 
   for (const other of allUsers) {
+    const uLower = username.toLowerCase();
+    const otherLower = other.toLowerCase();
     const rel = relations.find(
-      r => (r.requester === username && r.recipient === other) ||
-           (r.requester === other && r.recipient === username)
+      r => (r.requester.toLowerCase() === uLower && r.recipient.toLowerCase() === otherLower) ||
+           (r.requester.toLowerCase() === otherLower && r.recipient.toLowerCase() === uLower)
     );
 
     const online = isUserOnline(other);
@@ -211,7 +222,7 @@ async function getSocialDataForUser(username) {
     } else if (rel.status === 'accepted') {
       friends.push({ username: other, online });
     } else if (rel.status === 'pending') {
-      if (rel.recipient === username) {
+      if (rel.recipient.toLowerCase() === uLower) {
         requests.push({ username: other, online });
       } else {
         discover.push({ username: other, status: 'requested', online });
@@ -223,10 +234,10 @@ async function getSocialDataForUser(username) {
 }
 
 async function broadcastSocialUpdates() {
-  for (const username of userSockets.keys()) {
+  for (const [userKey] of userSockets.entries()) {
     try {
-      const data = await getSocialDataForUser(username);
-      emitToUser(username, 'social-data', data);
+      const data = await getSocialDataForUser(userKey);
+      emitToUser(userKey, 'social-data', data);
     } catch (e) {
       console.error('Error broadcasting social data:', e);
     }
@@ -234,18 +245,22 @@ async function broadcastSocialUpdates() {
 }
 
 async function areFriends(userA, userB) {
+  if (!userA || !userB) return false;
   if (useDB) {
     const res = await pool.query(
       `SELECT 1 FROM friendships
-       WHERE ((requester = $1 AND recipient = $2) OR (requester = $2 AND recipient = $1))
+       WHERE ((LOWER(requester) = LOWER($1) AND LOWER(recipient) = LOWER($2))
+          OR (LOWER(requester) = LOWER($2) AND LOWER(recipient) = LOWER($1)))
        AND status = 'accepted'`,
       [userA, userB]
     );
     return res.rows.length > 0;
   } else {
+    const aLower = userA.toLowerCase();
+    const bLower = userB.toLowerCase();
     return memoryFriendships.some(
-      f => ((f.requester === userA && f.recipient === userB) ||
-            (f.requester === userB && f.recipient === userA)) &&
+      f => ((f.requester.toLowerCase() === aLower && f.recipient.toLowerCase() === bLower) ||
+            (f.requester.toLowerCase() === bLower && f.recipient.toLowerCase() === aLower)) &&
            f.status === 'accepted'
     );
   }
@@ -261,10 +276,11 @@ io.on('connection', async (socket) => {
   }
 
   socket.username = username;
-  if (!userSockets.has(username)) {
-    userSockets.set(username, new Set());
+  const userKey = username.toLowerCase();
+  if (!userSockets.has(userKey)) {
+    userSockets.set(userKey, new Set());
   }
-  userSockets.get(username).add(socket.id);
+  userSockets.get(userKey).add(socket.id);
 
   // Send updated friend/online states to connected users
   await broadcastSocialUpdates();
@@ -276,19 +292,28 @@ io.on('connection', async (socket) => {
 
   // Send Friend Request
   socket.on('send-friend-request', async ({ to }) => {
-    if (!to || to === username) return;
+    if (!to || to.toLowerCase() === username.toLowerCase()) return;
     try {
       if (useDB) {
-        await pool.query(
-          `INSERT INTO friendships (requester, recipient, status)
-           VALUES ($1, $2, 'pending')
-           ON CONFLICT (requester, recipient) DO NOTHING`,
+        const existing = await pool.query(
+          `SELECT id, status FROM friendships
+           WHERE (LOWER(requester) = LOWER($1) AND LOWER(recipient) = LOWER($2))
+              OR (LOWER(requester) = LOWER($2) AND LOWER(recipient) = LOWER($1))`,
           [username, to]
         );
+        if (existing.rows.length === 0) {
+          await pool.query(
+            `INSERT INTO friendships (requester, recipient, status)
+             VALUES ($1, $2, 'pending')`,
+            [username, to]
+          );
+        }
       } else {
+        const uLower = username.toLowerCase();
+        const toLower = to.toLowerCase();
         const exists = memoryFriendships.find(
-          f => (f.requester === username && f.recipient === to) ||
-               (f.requester === to && f.recipient === username)
+          f => (f.requester.toLowerCase() === uLower && f.recipient.toLowerCase() === toLower) ||
+               (f.requester.toLowerCase() === toLower && f.recipient.toLowerCase() === uLower)
         );
         if (!exists) {
           memoryFriendships.push({ id: Date.now(), requester: username, recipient: to, status: 'pending' });
@@ -307,18 +332,22 @@ io.on('connection', async (socket) => {
       if (useDB) {
         if (action === 'accept') {
           await pool.query(
-            `UPDATE friendships SET status = 'accepted' WHERE requester = $1 AND recipient = $2`,
+            `UPDATE friendships SET status = 'accepted'
+             WHERE LOWER(requester) = LOWER($1) AND LOWER(recipient) = LOWER($2)`,
             [requester, username]
           );
         } else {
           await pool.query(
-            `DELETE FROM friendships WHERE requester = $1 AND recipient = $2`,
+            `DELETE FROM friendships
+             WHERE LOWER(requester) = LOWER($1) AND LOWER(recipient) = LOWER($2)`,
             [requester, username]
           );
         }
       } else {
+        const reqLower = requester.toLowerCase();
+        const uLower = username.toLowerCase();
         const idx = memoryFriendships.findIndex(
-          f => f.requester === requester && f.recipient === username
+          f => f.requester.toLowerCase() === reqLower && f.recipient.toLowerCase() === uLower
         );
         if (idx !== -1) {
           if (action === 'accept') {
@@ -334,43 +363,56 @@ io.on('connection', async (socket) => {
     }
   });
 
-  // Load 1-on-1 Private Chat History
+  // Load 1-on-1 Private Chat History (Strict Isolation: Only messages between username and friend)
   socket.on('load-private-chat', async ({ friend }) => {
     if (!friend) return;
     try {
       const allowed = await areFriends(username, friend);
-      if (!allowed) return;
+      if (!allowed) {
+        socket.emit('private-chat-history', { friend, messages: [] });
+        return;
+      }
 
       if (useDB) {
+        // Strict 1-on-1 Chat Isolation:
+        // Returns strictly messages exchanged ONLY between this exact pair
         const res = await pool.query(
           `SELECT id, username, recipient, text, created_at
            FROM messages
-           WHERE (username = $1 AND recipient = $2)
-              OR (username = $2 AND recipient = $1)
+           WHERE (LOWER(username) = LOWER($1) AND LOWER(recipient) = LOWER($2))
+              OR (LOWER(username) = LOWER($2) AND LOWER(recipient) = LOWER($1))
            ORDER BY id ASC`,
           [username, friend]
         );
         socket.emit('private-chat-history', { friend, messages: res.rows });
       } else {
+        const uLower = username.toLowerCase();
+        const fLower = friend.toLowerCase();
         const msgs = memoryMessages.filter(
-          m => (m.username === username && m.recipient === friend) ||
-               (m.username === friend && m.recipient === username)
+          m => (m.username && m.recipient && (
+            (m.username.toLowerCase() === uLower && m.recipient.toLowerCase() === fLower) ||
+            (m.username.toLowerCase() === fLower && m.recipient.toLowerCase() === uLower)
+          ))
         );
         socket.emit('private-chat-history', { friend, messages: msgs });
       }
     } catch (err) {
       console.error('Load private chat error:', err);
+      socket.emit('private-chat-history', { friend, messages: [] });
     }
   });
 
-  // Send 1-on-1 Private Message
+  // Send 1-on-1 Private Message (Offline Delivery Support & Strict Isolation)
   socket.on('private-message', async ({ to, text }) => {
     const cleanText = (text || '').trim();
     if (!to || !cleanText) return;
 
     try {
       const allowed = await areFriends(username, to);
-      if (!allowed) return;
+      if (!allowed) {
+        socket.emit('chat-error', { error: 'You can only message accepted friends.' });
+        return;
+      }
 
       let savedMsg = null;
       if (useDB) {
@@ -392,11 +434,17 @@ io.on('connection', async (socket) => {
         memoryMessages.push(savedMsg);
       }
 
-      // Emit strictly to sender and recipient
+      // 1. Instantly emit back to sender's socket(s) for UI confirmation
       emitToUser(username, 'private-message', savedMsg);
-      emitToUser(to, 'private-message', savedMsg);
+
+      // 2. If recipient is online, forward in real-time
+      if (to.toLowerCase() !== username.toLowerCase() && isUserOnline(to)) {
+        emitToUser(to, 'private-message', savedMsg);
+      }
+      // If offline, the message is safely stored in DB and will load on their next sign-in!
     } catch (err) {
       console.error('Send private message error:', err);
+      socket.emit('chat-error', { error: 'Failed to send message.' });
     }
   });
 
@@ -406,19 +454,24 @@ io.on('connection', async (socket) => {
     try {
       if (useDB) {
         const res = await pool.query(
-          'DELETE FROM messages WHERE id = $1 AND username = $2 RETURNING id',
+          'DELETE FROM messages WHERE id = $1 AND LOWER(username) = LOWER($2) RETURNING id',
           [id, username]
         );
         if (res.rows.length > 0) {
           emitToUser(username, 'message-deleted', id);
-          if (friend) emitToUser(friend, 'message-deleted', id);
+          if (friend && isUserOnline(friend)) {
+            emitToUser(friend, 'message-deleted', id);
+          }
         }
       } else {
-        const idx = memoryMessages.findIndex(m => String(m.id) === String(id) && m.username === username);
+        const uLower = username.toLowerCase();
+        const idx = memoryMessages.findIndex(m => String(m.id) === String(id) && m.username.toLowerCase() === uLower);
         if (idx !== -1) {
           memoryMessages.splice(idx, 1);
           emitToUser(username, 'message-deleted', id);
-          if (friend) emitToUser(friend, 'message-deleted', id);
+          if (friend && isUserOnline(friend)) {
+            emitToUser(friend, 'message-deleted', id);
+          }
         }
       }
     } catch (err) {
@@ -469,11 +522,12 @@ io.on('connection', async (socket) => {
   });
 
   socket.on('disconnect', async () => {
-    const set = userSockets.get(username);
+    const userKey = username.toLowerCase();
+    const set = userSockets.get(userKey);
     if (set) {
       set.delete(socket.id);
       if (set.size === 0) {
-        userSockets.delete(username);
+        userSockets.delete(userKey);
       }
     }
     await broadcastSocialUpdates();
