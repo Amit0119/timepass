@@ -90,9 +90,9 @@
                     </svg>
                 </button>
                 <div class="status-indicator" id="status-indicator" title="Connected"></div>
-                <div>
-                    <h2>Live Chat & Calls</h2>
-                    <span class="chat-status-text" id="chat-status-text">Connected</span>
+                <div class="chat-header-text-group">
+                    <h2 id="chat-header-title">Live Chat</h2>
+                    <span class="chat-status-text" id="chat-status-text">Select a friend to message</span>
                 </div>
             </div>
             
@@ -118,6 +118,9 @@
 
         <!-- Main Body: Friends Sidebar + Chat Messages -->
         <div class="chat-body-layout">
+            <!-- Mobile Drawer Backdrop Overlay -->
+            <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+
             <!-- Instagram-Style Friends Sidebar with 3 Compact Tabs -->
             <aside class="users-sidebar" id="users-sidebar">
                 <!-- Sidebar Tabs Header -->
@@ -133,6 +136,7 @@
                     <button type="button" class="sidebar-tab" id="tab-sidebar-find" title="Find and Add Users">
                         <span>Find</span>
                     </button>
+                    <button type="button" class="sidebar-close-btn" id="sidebar-close-btn" title="Close Sidebar" aria-label="Close sidebar">✕</button>
                 </div>
 
                 <!-- Tab 1: Friends List Pane -->
@@ -174,14 +178,16 @@
             <!-- Chat Messages Column -->
             <section class="chat-messages-section">
                 <div class="messages-container" id="messages">
-                    <div class="message system-message">
-                        Welcome meri pyari moti
+                    <div class="empty-chat-state" id="empty-chat-state">
+                        <div class="empty-chat-icon">💬</div>
+                        <h3>Select a Friend</h3>
+                        <p>Choose an accepted friend from the sidebar to open your private conversation.</p>
                     </div>
                 </div>
                 
                 <form class="input-area" id="form" action="">
-                    <input id="input" autocomplete="off" placeholder="Type your message..." required />
-                    <button class="send-btn" type="submit" aria-label="Send message">
+                    <input id="input" autocomplete="off" placeholder="Select a friend to message..." disabled required />
+                    <button class="send-btn" id="send-btn" type="submit" disabled aria-label="Send message">
                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <line x1="22" y1="2" x2="11" y2="13"></line>
                             <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>

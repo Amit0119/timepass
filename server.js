@@ -93,6 +93,7 @@ try {
             username VARCHAR(50)
           );
           ALTER TABLE messages ADD COLUMN IF NOT EXISTS username VARCHAR(50);
+          ALTER TABLE messages ADD COLUMN IF NOT EXISTS receiver VARCHAR(50);
           CREATE TABLE IF NOT EXISTS friendships (
             id SERIAL PRIMARY KEY,
             requester VARCHAR(50) NOT NULL,
@@ -477,6 +478,16 @@ app.post('/register', async (req, res) => {
 
         if (pool) {
             try {
+                // Strict 2-user limit check
+                const countRes = await pool.query('SELECT COUNT(*) FROM users');
+                const totalUsers = parseInt(countRes.rows[0].count, 10);
+                if (totalUsers >= 2) {
+                    return res.status(403).json({
+                        success: false,
+                        error: 'Registration closed. This is a private app limited to 2 users.'
+                    });
+                }
+
                 const queryPromise = pool.query(
                     'INSERT INTO users (username, password) VALUES ($1, $2) RETURNING id, username',
                     [trimmedUser, password]
@@ -494,6 +505,13 @@ app.post('/register', async (req, res) => {
             }
         } else {
             // In-memory fallback
+            if (memoryUsers.size >= 2) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Registration closed. This is a private app limited to 2 users.'
+                });
+            }
+
             const lowerKey = trimmedUser.toLowerCase();
             if (memoryUsers.has(lowerKey)) {
                 return res.status(409).json({ success: false, error: 'Username is already taken' });
@@ -631,28 +649,50 @@ io.on('connection', async (socket) => {
     // Notify user's friends that this user is now online
     await notifyAllFriendsOfStatusChange(username);
 
-    // Chat History
-    if (pool) {
-        try {
-            const queryPromise = pool.query('SELECT * FROM (SELECT * FROM messages ORDER BY timestamp DESC LIMIT 50) AS recent ORDER BY timestamp ASC');
-            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("History fetch timeout")), 3000));
-            
-            const res = await Promise.race([queryPromise, timeoutPromise]);
-            const history = res.rows.map(row => ({
-                id: row.id,
-                socket_id: row.socket_id,
-                username: row.username || 'Anonymous',
-                text: row.text,
-                time: new Date(row.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            }));
-            socket.emit('chat history', history);
-        } catch (err) {
-            console.error("Error fetching history from DB:", err.message);
-            socket.emit('chat history', memoryMessages.slice(-50));
+    // Fetch 1-on-1 Chat History for a specific selected friend
+    socket.on('get-chat-history', async (data) => {
+        const friend = data && data.friendUsername ? String(data.friendUsername).trim() : '';
+        if (!friend || !socket.username) return;
+
+        let history = [];
+        if (pool) {
+            try {
+                const queryPromise = pool.query(
+                    `SELECT * FROM (
+                        SELECT id, socket_id, username, receiver, text, timestamp 
+                        FROM messages 
+                        WHERE (LOWER(username) = LOWER($1) AND LOWER(receiver) = LOWER($2))
+                           OR (LOWER(username) = LOWER($2) AND LOWER(receiver) = LOWER($1))
+                        ORDER BY timestamp DESC LIMIT 100
+                    ) AS recent ORDER BY timestamp ASC`,
+                    [socket.username, friend]
+                );
+                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("History fetch timeout")), 3000));
+                const res = await Promise.race([queryPromise, timeoutPromise]);
+                history = res.rows.map(row => ({
+                    id: row.id,
+                    socket_id: row.socket_id,
+                    username: row.username,
+                    receiver: row.receiver,
+                    text: row.text,
+                    time: new Date(row.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                }));
+            } catch (err) {
+                console.error("Error fetching private history from DB:", err.message);
+            }
+        } else {
+            const selfLower = socket.username.toLowerCase();
+            const friendLower = friend.toLowerCase();
+            history = memoryMessages.filter(m => 
+                (m.username && m.receiver && (
+                    (m.username.toLowerCase() === selfLower && m.receiver.toLowerCase() === friendLower) ||
+                    (m.username.toLowerCase() === friendLower && m.receiver.toLowerCase() === selfLower)
+                ))
+            );
         }
-    } else {
-        socket.emit('chat history', memoryMessages.slice(-50));
-    }
+
+        socket.emit('chat history', { friendUsername: friend, history });
+    });
 
     // ==================== FRIEND SYSTEM SOCKET LISTENERS ====================
 
@@ -687,54 +727,63 @@ io.on('connection', async (socket) => {
         }
     });
 
-    // ==================== CHAT MESSAGE BROADCAST ====================
+    // ==================== PRIVATE 1-ON-1 CHAT MESSAGING ====================
 
-    socket.on('chat message', async (msgPayload) => {
-        let text = '';
-        let senderName = socket.username || 'Anonymous';
+    async function handlePrivateMessage(msgPayload) {
+        if (!msgPayload || typeof msgPayload !== 'object') return;
+        const text = String(msgPayload.text || '').trim();
+        const receiver = String(msgPayload.receiver || '').trim();
+        const sender = socket.username;
 
-        if (typeof msgPayload === 'object' && msgPayload !== null) {
-            text = msgPayload.text || '';
-            if (msgPayload.username) senderName = msgPayload.username;
-        } else {
-            text = String(msgPayload || '');
-        }
-
-        if (!text.trim()) return;
+        if (!text || !receiver || !sender) return;
 
         let dbId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         let timestamp = new Date();
-        
+
         if (pool) {
             try {
                 const queryPromise = pool.query(
-                    'INSERT INTO messages (text, socket_id, username) VALUES ($1, $2, $3) RETURNING id, timestamp',
-                    [text, socket.id, senderName]
+                    'INSERT INTO messages (text, socket_id, username, receiver) VALUES ($1, $2, $3, $4) RETURNING id, timestamp',
+                    [text, socket.id, sender, receiver]
                 );
                 const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("DB insert timeout")), 3000));
-                
                 const res = await Promise.race([queryPromise, timeoutPromise]);
-                const newMsg = res.rows[0];
-                dbId = newMsg.id;
-                timestamp = new Date(newMsg.timestamp);
+                dbId = res.rows[0].id;
+                timestamp = new Date(res.rows[0].timestamp);
             } catch (err) {
-                console.error("Error saving message to DB (falling back to memory):", err.message);
+                console.error("Error saving private message to DB:", err.message);
             }
         }
-        
+
         const messageData = {
             id: dbId,
             socket_id: socket.id,
-            username: senderName,
+            username: sender,
+            receiver: receiver,
             text: text,
             time: timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         };
 
         memoryMessages.push(messageData);
-        if (memoryMessages.length > 100) memoryMessages.shift();
+        if (memoryMessages.length > 200) memoryMessages.shift();
 
-        io.emit('chat message', messageData);
-    });
+        // 1. Emit to sender's own socket(s) for UI confirmation
+        const senderSockets = userSockets.get(sender.toLowerCase());
+        if (senderSockets && senderSockets.size > 0) {
+            senderSockets.forEach(sId => io.to(sId).emit('private message', messageData));
+        } else {
+            socket.emit('private message', messageData);
+        }
+
+        // 2. Emit strictly to intended receiver's socket(s)
+        const receiverSockets = userSockets.get(receiver.toLowerCase());
+        if (receiverSockets && receiverSockets.size > 0) {
+            receiverSockets.forEach(sId => io.to(sId).emit('private message', messageData));
+        }
+    }
+
+    socket.on('private message', handlePrivateMessage);
+    socket.on('chat message', handlePrivateMessage);
 
     // Delete message
     socket.on('delete message', async (msgId) => {

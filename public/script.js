@@ -51,15 +51,21 @@ const authSwitchText = document.getElementById('auth-switch-text');
 const authSwitchBtn = document.getElementById('auth-switch-btn');
 
 // Chat & Header
+let activeChatFriend = null;
 const chatContainer = document.getElementById('chat-container');
+const chatHeaderTitle = document.getElementById('chat-header-title');
 const currentUserDisplay = document.getElementById('current-user-display');
 const chatStatusText = document.getElementById('chat-status-text');
 const statusIndicator = document.getElementById('status-indicator');
 const logoutBtn = document.getElementById('logout-btn');
 const messagesContainer = document.getElementById('messages');
+const emptyChatState = document.getElementById('empty-chat-state');
 const chatForm = document.getElementById('form');
 const chatInput = document.getElementById('input');
+const sendBtn = document.getElementById('send-btn');
 const usersSidebar = document.getElementById('users-sidebar');
+const sidebarBackdrop = document.getElementById('sidebar-backdrop');
+const sidebarCloseBtn = document.getElementById('sidebar-close-btn');
 const toggleUsersBtn = document.getElementById('toggle-users-btn');
 const sidebarCollapseBtn = document.getElementById('sidebar-collapse-btn');
 const requestsHeaderBadge = document.getElementById('requests-header-badge');
@@ -255,7 +261,42 @@ function onLoginSuccess(username) {
         currentUserDisplay.textContent = username;
     }
 
+    resetChatWindow();
     connectSocket(username);
+}
+
+// Drawer Controls for Mobile
+function openMobileSidebar() {
+    if (usersSidebar) usersSidebar.classList.add('open');
+    if (sidebarBackdrop) sidebarBackdrop.classList.add('active');
+}
+
+function closeMobileSidebar() {
+    if (usersSidebar) usersSidebar.classList.remove('open');
+    if (sidebarBackdrop) sidebarBackdrop.classList.remove('active');
+}
+
+// Reset Chat Window to Empty / Disabled State
+function resetChatWindow() {
+    activeChatFriend = null;
+    if (chatHeaderTitle) chatHeaderTitle.textContent = 'Live Chat';
+    if (chatStatusText) chatStatusText.textContent = 'Select a friend to message';
+    if (statusIndicator) statusIndicator.className = 'status-indicator';
+    if (chatInput) {
+        chatInput.value = '';
+        chatInput.disabled = true;
+        chatInput.placeholder = 'Select a friend to message...';
+    }
+    if (sendBtn) sendBtn.disabled = true;
+    if (messagesContainer) {
+        messagesContainer.innerHTML = `
+            <div class="empty-chat-state" id="empty-chat-state">
+                <div class="empty-chat-icon">💬</div>
+                <h3>Select a Friend</h3>
+                <p>Choose an accepted friend from the sidebar to open your private conversation.</p>
+            </div>
+        `;
+    }
 }
 
 // Logout handler
@@ -267,6 +308,8 @@ if (logoutBtn) {
             socket = null;
         }
         currentUser = null;
+        resetChatWindow();
+        closeMobileSidebar();
         chatContainer.style.display = 'none';
         authContainer.style.display = 'flex';
         authUsername.focus();
@@ -276,8 +319,12 @@ if (logoutBtn) {
 // Toggle collapsible sidebar (Desktop slide & Mobile drawer)
 if (sidebarCollapseBtn && usersSidebar) {
     sidebarCollapseBtn.addEventListener('click', () => {
-        if (window.innerWidth <= 767) {
-            usersSidebar.classList.toggle('open');
+        if (window.innerWidth <= 768) {
+            if (usersSidebar.classList.contains('open')) {
+                closeMobileSidebar();
+            } else {
+                openMobileSidebar();
+            }
         } else {
             const isCollapsed = usersSidebar.classList.toggle('collapsed');
             sidebarCollapseBtn.classList.toggle('sidebar-is-collapsed', isCollapsed);
@@ -288,8 +335,22 @@ if (sidebarCollapseBtn && usersSidebar) {
 // Toggle mobile sidebar via header button
 if (toggleUsersBtn && usersSidebar) {
     toggleUsersBtn.addEventListener('click', () => {
-        usersSidebar.classList.toggle('open');
+        if (usersSidebar.classList.contains('open')) {
+            closeMobileSidebar();
+        } else {
+            openMobileSidebar();
+        }
     });
+}
+
+// Close mobile sidebar via backdrop click
+if (sidebarBackdrop) {
+    sidebarBackdrop.addEventListener('click', closeMobileSidebar);
+}
+
+// Close mobile sidebar via close button (✕)
+if (sidebarCloseBtn) {
+    sidebarCloseBtn.addEventListener('click', closeMobileSidebar);
 }
 
 // ==================== SIDEBAR TABS SWITCHING ====================
@@ -364,9 +425,17 @@ function connectSocket(username) {
         }
     });
 
-    // Chat History
-    socket.on('chat history', (history) => {
-        if (!messagesContainer) return;
+    // 1-on-1 Chat History
+    socket.on('chat history', (data) => {
+        if (!messagesContainer || !data) return;
+        const history = Array.isArray(data) ? data : (data.history || []);
+        const friendName = data.friendUsername;
+
+        // Ensure this history belongs to the currently active chat
+        if (friendName && activeChatFriend && friendName.toLowerCase() !== activeChatFriend.toLowerCase()) {
+            return;
+        }
+
         messagesContainer.innerHTML = '';
 
         const systemMsg = document.createElement('div');
@@ -379,10 +448,31 @@ function connectSocket(username) {
         }
     });
 
-    // Chat Message
-    socket.on('chat message', (data) => {
-        appendMessage(data);
-    });
+    // Handle 1-on-1 Private Messages
+    function handleIncomingPrivateMessage(data) {
+        if (!data) return;
+        const sender = (data.username || '').toLowerCase();
+        const receiver = (data.receiver || '').toLowerCase();
+        const activeLower = activeChatFriend ? activeChatFriend.toLowerCase() : null;
+        const selfLower = currentUser ? currentUser.toLowerCase() : null;
+
+        const isCurrentChat = activeLower && (
+            (sender === selfLower && receiver === activeLower) ||
+            (sender === activeLower && receiver === selfLower)
+        );
+
+        if (isCurrentChat) {
+            const emptyState = document.getElementById('empty-chat-state');
+            if (emptyState) emptyState.remove();
+            appendMessage(data);
+        } else if (sender !== selfLower) {
+            const preview = data.text && data.text.length > 28 ? data.text.substring(0, 28) + '...' : (data.text || '');
+            showToast(`💬 ${data.username}: ${preview}`);
+        }
+    }
+
+    socket.on('private message', handleIncomingPrivateMessage);
+    socket.on('chat message', handleIncomingPrivateMessage);
 
     // Delete Message
     socket.on('message deleted', (msgId) => {
@@ -508,6 +598,14 @@ function renderFriendsList(friends) {
     sortedFriends.forEach(friend => {
         const item = document.createElement('div');
         item.className = 'friend-item';
+        item.dataset.username = friend.username;
+
+        // If this friend is currently open in chat, highlight and update status
+        if (activeChatFriend && activeChatFriend.toLowerCase() === friend.username.toLowerCase()) {
+            item.classList.add('active-chat-friend');
+            if (chatStatusText) chatStatusText.textContent = friend.isOnline ? 'Online' : 'Offline';
+            if (statusIndicator) statusIndicator.className = `status-indicator ${friend.isOnline ? '' : 'disconnected'}`;
+        }
 
         const info = document.createElement('div');
         info.className = 'friend-info';
@@ -550,7 +648,8 @@ function renderFriendsList(friends) {
         voiceBtn.className = `call-action-btn voice-btn ${!friend.isOnline ? 'disabled-call-btn' : ''}`;
         voiceBtn.textContent = '📞';
         voiceBtn.title = friend.isOnline ? `Voice call ${friend.username}` : `${friend.username} is offline`;
-        voiceBtn.addEventListener('click', () => {
+        voiceBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
             if (friend.isOnline && friend.socketId) {
                 initiateCall(friend.socketId, friend.username, false);
             } else {
@@ -562,7 +661,8 @@ function renderFriendsList(friends) {
         videoBtn.className = `call-action-btn video-btn ${!friend.isOnline ? 'disabled-call-btn' : ''}`;
         videoBtn.textContent = '📹';
         videoBtn.title = friend.isOnline ? `Video call ${friend.username}` : `${friend.username} is offline`;
-        videoBtn.addEventListener('click', () => {
+        videoBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
             if (friend.isOnline && friend.socketId) {
                 initiateCall(friend.socketId, friend.username, true);
             } else {
@@ -576,8 +676,71 @@ function renderFriendsList(friends) {
         item.appendChild(info);
         item.appendChild(actions);
 
+        // Clicking the friend opens their private 1-on-1 chat
+        item.addEventListener('click', (e) => {
+            if (e.target.closest('.call-action-btn')) return;
+            selectFriendForChat(friend);
+        });
+
         friendsList.appendChild(item);
     });
+}
+
+// Select a Friend to Open 1-on-1 Chat
+function selectFriendForChat(friend) {
+    if (!friend || !friend.username) return;
+    activeChatFriend = friend.username;
+
+    // Update active highlight in friends list
+    const allFriendItems = document.querySelectorAll('.friend-item');
+    allFriendItems.forEach(el => {
+        if (el.dataset.username && el.dataset.username.toLowerCase() === friend.username.toLowerCase()) {
+            el.classList.add('active-chat-friend');
+        } else {
+            el.classList.remove('active-chat-friend');
+        }
+    });
+
+    // Update Chat Header
+    if (chatHeaderTitle) {
+        chatHeaderTitle.textContent = `Chatting with ${friend.username}`;
+    }
+    if (chatStatusText) {
+        chatStatusText.textContent = friend.isOnline ? 'Online' : 'Offline';
+    }
+    if (statusIndicator) {
+        statusIndicator.className = `status-indicator ${friend.isOnline ? '' : 'disconnected'}`;
+    }
+
+    // Enable chat input & send button
+    if (chatInput) {
+        chatInput.disabled = false;
+        chatInput.placeholder = `Message ${friend.username}...`;
+    }
+    if (sendBtn) {
+        sendBtn.disabled = false;
+    }
+
+    // Clear messages and set initial system greeting
+    if (messagesContainer) {
+        messagesContainer.innerHTML = '';
+        const systemMsg = document.createElement('div');
+        systemMsg.classList.add('message', 'system-message');
+        systemMsg.textContent = 'Welcome meri pyari moti';
+        messagesContainer.appendChild(systemMsg);
+    }
+
+    // Request 1-on-1 history from server
+    if (socket) {
+        socket.emit('get-chat-history', { friendUsername: friend.username });
+    }
+
+    // Close mobile drawer if open
+    closeMobileSidebar();
+
+    if (chatInput) {
+        chatInput.focus();
+    }
 }
 
 // Render Incoming Friend Requests
@@ -795,14 +958,22 @@ function respondFriendRequest(requestId, action) {
 
 // ==================== CHAT MESSAGING ====================
 
-// Send Message Handler
+// Send Message Handler (Strictly 1-on-1 Private Messaging)
 if (chatForm && chatInput) {
     chatForm.addEventListener('submit', (e) => {
         e.preventDefault();
         const text = chatInput.value.trim();
-        if (text && socket && currentUser) {
-            socket.emit('chat message', {
+        if (!text) return;
+
+        if (!activeChatFriend) {
+            showToast('Please select an accepted friend to chat with.');
+            return;
+        }
+
+        if (socket && currentUser) {
+            socket.emit('private message', {
                 text: text,
+                receiver: activeChatFriend,
                 username: currentUser
             });
             chatInput.value = '';
