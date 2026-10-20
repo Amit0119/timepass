@@ -3,6 +3,19 @@ let currentUser = null;
 let activeFriend = null;
 let socialState = { friends: [], requests: [], discover: [] };
 
+// UX & Notification State
+let unreadCounts = {};
+let originalDocumentTitle = document.title || 'Private Space 💜';
+let titleBlinkInterval = null;
+let notifBannerTimeout = null;
+let audioCtx = null;
+let currentAudioRoute = 'speaker'; // 'speaker' | 'earpiece'
+let callToastTimeout = null;
+
+// Notification Sound Toggle: CRITICAL - MUST be set to OFF by default (initial state)
+const storedSoundPref = localStorage.getItem('sound_notifications_enabled');
+let soundNotificationsEnabled = storedSoundPref === 'true'; // strictly false by default
+
 // WebRTC State
 let peerConnection = null;
 let localStream = null;
@@ -89,7 +102,26 @@ const activeCallUsername = document.getElementById('active-call-username');
 const callTimerEl = document.getElementById('call-timer');
 const toggleMicBtn = document.getElementById('toggle-mic-btn');
 const toggleCamBtn = document.getElementById('toggle-cam-btn');
+const toggleAudioRouteBtn = document.getElementById('toggle-audio-route-btn');
 const endCallBtn = document.getElementById('end-call-btn');
+const callToast = document.getElementById('call-toast');
+const callToastIcon = document.getElementById('call-toast-icon');
+const callToastText = document.getElementById('call-toast-text');
+
+// DOM Elements - In-App Notification Banner
+const notifBanner = document.getElementById('msg-notification-banner');
+const notifAvatar = document.getElementById('notif-avatar');
+const notifSender = document.getElementById('notif-sender');
+const notifText = document.getElementById('notif-text');
+const notifCloseBtn = document.getElementById('notif-close-btn');
+
+// DOM Elements - Settings Modal & Notification Toggle
+const settingsBtn = document.getElementById('settings-btn');
+const headerSettingsBtn = document.getElementById('header-settings-btn');
+const settingsModal = document.getElementById('settings-modal');
+const closeSettingsBtn = document.getElementById('close-settings-btn');
+const saveSettingsBtn = document.getElementById('save-settings-btn');
+const toggleSoundNotifications = document.getElementById('toggle-sound-notifications');
 
 let authMode = 'login';
 
@@ -168,6 +200,10 @@ logoutBtn.addEventListener('click', () => {
   if (socket) socket.disconnect();
   currentUser = null;
   activeFriend = null;
+  unreadCounts = {};
+  resetTitleAlert();
+  dismissNotificationBanner();
+  closeSettingsModal();
   messagesList.innerHTML = '';
   chatContainer.style.display = 'none';
   authContainer.style.display = 'flex';
@@ -231,20 +267,37 @@ function connectSocket() {
   });
 
   socket.on('private-message', (msg) => {
-    if (!currentUser || !activeFriend || !msg) return;
+    if (!currentUser || !msg) return;
     const sender = (msg.username || '').toLowerCase();
     const recipient = (msg.recipient || '').toLowerCase();
     const me = currentUser.toLowerCase();
-    const friend = activeFriend.toLowerCase();
 
-    // Strict 1-on-1 Chat Isolation: message must belong strictly to this active pair
-    const isRelevant =
-      (sender === me && recipient === friend) ||
-      (sender === friend && recipient === me);
+    // 1. Private message received from a friend
+    if (recipient === me && sender !== me) {
+      if (soundNotificationsEnabled) {
+        playNotificationSound();
+      }
 
-    if (isRelevant) {
-      appendMessage(msg);
-      scrollToBottom();
+      const isChatOpenWithSender = activeFriend && activeFriend.toLowerCase() === sender;
+      if (isChatOpenWithSender) {
+        appendMessage(msg);
+        scrollToBottom();
+        if (document.hidden || !document.hasFocus()) {
+          triggerTitleAlert(msg.username);
+        }
+      } else {
+        // Message arrived while in another chat or sidebar
+        unreadCounts[sender] = (unreadCounts[sender] || 0) + 1;
+        renderSocialLists();
+        showNotificationBanner(msg.username, msg.text);
+        triggerTitleAlert(msg.username);
+      }
+    } else if (sender === me) {
+      // 2. Sent message confirmed by server
+      if (activeFriend && recipient === activeFriend.toLowerCase()) {
+        appendMessage(msg);
+        scrollToBottom();
+      }
     }
   });
 
@@ -273,7 +326,15 @@ function connectSocket() {
 function renderSocialLists() {
   const { friends, requests, discover } = socialState;
 
-  badgeFriends.textContent = friends.length;
+  const totalUnreads = Object.values(unreadCounts).reduce((a, b) => a + b, 0);
+  if (totalUnreads > 0) {
+    badgeFriends.textContent = `${friends.length} (${totalUnreads})`;
+    badgeFriends.classList.add('alert');
+  } else {
+    badgeFriends.textContent = friends.length;
+    badgeFriends.classList.remove('alert');
+  }
+
   if (requests.length > 0) {
     badgeRequests.style.display = 'inline-block';
     badgeRequests.textContent = requests.length;
@@ -291,11 +352,15 @@ function renderSocialLists() {
     friends.forEach(f => {
       const card = document.createElement('div');
       card.className = `user-card ${activeFriend === f.username ? 'active-chat' : ''}`;
+      const unreads = unreadCounts[f.username.toLowerCase()] || 0;
       card.innerHTML = `
         <div class="user-card-left">
           <div class="avatar-circle small">${f.username.charAt(0).toUpperCase()}</div>
           <div>
-            <div class="user-card-name">${escapeHTML(f.username)}</div>
+            <div class="user-card-name">
+              ${escapeHTML(f.username)}
+              ${unreads > 0 ? `<span class="user-unread-badge">${unreads}</span>` : ''}
+            </div>
             <div class="user-card-sub">
               <span class="${f.online ? 'dot-online' : 'dot-offline'}"></span>
               ${f.online ? 'Online' : 'Offline'}
@@ -390,10 +455,180 @@ function renderSocialLists() {
   }
 }
 
+// ================= NOTIFICATION SOUND & VISUAL ALERTS =================
+
+function playNotificationSound() {
+  // CRITICAL: Sound ONLY plays when Notification toggle is explicitly turned ON
+  if (!soundNotificationsEnabled) return;
+
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+
+    if (!audioCtx) {
+      audioCtx = new AudioContextClass();
+    }
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+
+    const now = audioCtx.currentTime;
+
+    // Pleasant two-tone chime (E5: 659.25Hz -> A5: 880.00Hz)
+    const osc1 = audioCtx.createOscillator();
+    const gain1 = audioCtx.createGain();
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(659.25, now);
+    gain1.gain.setValueAtTime(0.12, now);
+    gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+    osc1.connect(gain1);
+    gain1.connect(audioCtx.destination);
+    osc1.start(now);
+    osc1.stop(now + 0.12);
+
+    const osc2 = audioCtx.createOscillator();
+    const gain2 = audioCtx.createGain();
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(880.00, now + 0.08);
+    gain2.gain.setValueAtTime(0.15, now + 0.08);
+    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+    osc2.connect(gain2);
+    gain2.connect(audioCtx.destination);
+    osc2.start(now + 0.08);
+    osc2.stop(now + 0.28);
+  } catch (err) {
+    console.warn('[NotificationSound] AudioContext error:', err);
+  }
+}
+
+function unlockAudioContext() {
+  if (audioCtx && audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
+}
+window.addEventListener('click', unlockAudioContext, { passive: true });
+window.addEventListener('keydown', unlockAudioContext, { passive: true });
+window.addEventListener('touchstart', unlockAudioContext, { passive: true });
+
+function triggerTitleAlert(senderName) {
+  if (!document.hidden && document.hasFocus()) return;
+  if (titleBlinkInterval) clearInterval(titleBlinkInterval);
+
+  let toggle = false;
+  titleBlinkInterval = setInterval(() => {
+    document.title = toggle
+      ? `💬 New message from ${senderName}!`
+      : `(1) Private Space 💜`;
+    toggle = !toggle;
+  }, 1000);
+}
+
+function resetTitleAlert() {
+  if (titleBlinkInterval) {
+    clearInterval(titleBlinkInterval);
+    titleBlinkInterval = null;
+  }
+  document.title = originalDocumentTitle;
+}
+
+window.addEventListener('focus', resetTitleAlert);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && document.hasFocus()) {
+    resetTitleAlert();
+  }
+});
+
+function showNotificationBanner(sender, text) {
+  if (!notifBanner) return;
+
+  if (notifAvatar) notifAvatar.textContent = (sender || '?').charAt(0).toUpperCase();
+  if (notifSender) notifSender.textContent = sender;
+  if (notifText) notifText.textContent = text;
+
+  notifBanner.classList.remove('dismissing');
+  notifBanner.style.display = 'flex';
+
+  if (notifBannerTimeout) clearTimeout(notifBannerTimeout);
+  notifBannerTimeout = setTimeout(dismissNotificationBanner, 4500);
+}
+
+function dismissNotificationBanner() {
+  if (!notifBanner) return;
+  notifBanner.classList.add('dismissing');
+  setTimeout(() => {
+    if (notifBanner && notifBanner.classList.contains('dismissing')) {
+      notifBanner.style.display = 'none';
+      notifBanner.classList.remove('dismissing');
+    }
+  }, 260);
+}
+
+if (notifCloseBtn) {
+  notifCloseBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    dismissNotificationBanner();
+  });
+}
+
+if (notifBanner) {
+  notifBanner.addEventListener('click', () => {
+    const sender = notifSender ? notifSender.textContent : null;
+    dismissNotificationBanner();
+    if (sender) {
+      selectFriend(sender);
+      closeMobileSidebar();
+    }
+  });
+}
+
+// ================= SETTINGS MODAL & SOUND PREFERENCE =================
+
+function openSettingsModal() {
+  if (settingsModal) {
+    if (toggleSoundNotifications) {
+      toggleSoundNotifications.checked = soundNotificationsEnabled;
+    }
+    settingsModal.style.display = 'flex';
+  }
+}
+
+function closeSettingsModal() {
+  if (settingsModal) {
+    settingsModal.style.display = 'none';
+  }
+}
+
+if (toggleSoundNotifications) {
+  // Ensure DOM toggle is initialized (OFF by default)
+  toggleSoundNotifications.checked = soundNotificationsEnabled;
+  toggleSoundNotifications.addEventListener('change', (e) => {
+    soundNotificationsEnabled = e.target.checked;
+    localStorage.setItem('sound_notifications_enabled', String(soundNotificationsEnabled));
+  });
+}
+
+if (settingsBtn) settingsBtn.addEventListener('click', openSettingsModal);
+if (headerSettingsBtn) headerSettingsBtn.addEventListener('click', openSettingsModal);
+if (closeSettingsBtn) closeSettingsBtn.addEventListener('click', closeSettingsModal);
+if (saveSettingsBtn) saveSettingsBtn.addEventListener('click', closeSettingsModal);
+
+if (settingsModal) {
+  settingsModal.addEventListener('click', (e) => {
+    if (e.target === settingsModal) {
+      closeSettingsModal();
+    }
+  });
+}
+
 // ================= PRIVATE 1-ON-1 CHAT =================
 
 function selectFriend(friendName) {
   activeFriend = friendName;
+  if (friendName) {
+    delete unreadCounts[friendName.toLowerCase()];
+  }
+  resetTitleAlert();
+
   emptyChatState.style.display = 'none';
   messageInput.disabled = false;
   sendBtn.disabled = false;
@@ -626,6 +861,9 @@ function showActiveCallScreen() {
     toggleCamBtn.style.display = 'none';
   }
 
+  // Default to speakerphone on call start and initialize routing
+  applyAudioRouting('speaker');
+
   callSeconds = 0;
   callTimerEl.textContent = '00:00';
   clearInterval(callTimerInterval);
@@ -655,6 +893,111 @@ toggleCamBtn.addEventListener('click', () => {
   }
 });
 
+// Audio Output Routing Controls (Speaker vs Earpiece)
+if (toggleAudioRouteBtn) {
+  toggleAudioRouteBtn.addEventListener('click', () => {
+    const nextMode = currentAudioRoute === 'speaker' ? 'earpiece' : 'speaker';
+    applyAudioRouting(nextMode);
+  });
+}
+
+function showCallToast(icon, text) {
+  if (!callToast) return;
+  if (callToastIcon) callToastIcon.textContent = icon;
+  if (callToastText) callToastText.textContent = text;
+
+  callToast.classList.remove('fade-out');
+  callToast.style.display = 'flex';
+
+  if (callToastTimeout) clearTimeout(callToastTimeout);
+  callToastTimeout = setTimeout(() => {
+    callToast.classList.add('fade-out');
+    setTimeout(() => {
+      if (callToast && callToast.classList.contains('fade-out')) {
+        callToast.style.display = 'none';
+      }
+    }, 300);
+  }, 1800);
+}
+
+async function applyAudioRouting(mode) {
+  currentAudioRoute = mode;
+  const isSpeaker = mode === 'speaker';
+
+  // 1. Update toggle button appearance
+  if (toggleAudioRouteBtn) {
+    toggleAudioRouteBtn.textContent = isSpeaker ? '🔊' : '📞';
+    toggleAudioRouteBtn.title = isSpeaker
+      ? 'Current: Speakerphone (Click for Earpiece)'
+      : 'Current: Earpiece / Normal Call (Click for Speakerphone)';
+    toggleAudioRouteBtn.classList.toggle('earpiece-mode', !isSpeaker);
+  }
+
+  // 2. Display visual toast inside call modal
+  showCallToast(
+    isSpeaker ? '🔊' : '📞',
+    isSpeaker ? 'Speakerphone Mode' : 'Earpiece / Normal Call'
+  );
+
+  // 3. Device output routing via setSinkId if supported
+  if (remoteVideo && typeof remoteVideo.setSinkId === 'function') {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const audioOutputs = devices.filter(d => d.kind === 'audiooutput');
+
+      if (audioOutputs.length > 0) {
+        let targetSinkId = '';
+        if (isSpeaker) {
+          const speakerDev = audioOutputs.find(d =>
+            /speaker|loudspeaker|external/i.test(d.label)
+          );
+          targetSinkId = speakerDev ? speakerDev.deviceId : 'default';
+        } else {
+          const earpieceDev = audioOutputs.find(d =>
+            /earpiece|receiver|handset|phone|internal|telephony/i.test(d.label)
+          );
+          if (earpieceDev) {
+            targetSinkId = earpieceDev.deviceId;
+          } else {
+            const nonSpeaker = audioOutputs.find(d =>
+              !/speaker|loudspeaker/i.test(d.label) && d.deviceId && d.deviceId !== 'default'
+            );
+            targetSinkId = nonSpeaker ? nonSpeaker.deviceId : 'default';
+          }
+        }
+
+        if (targetSinkId !== undefined) {
+          await remoteVideo.setSinkId(targetSinkId);
+          console.log(`[AudioRoute] Output routed via setSinkId to: ${targetSinkId} (${mode})`);
+        }
+      }
+    } catch (sinkErr) {
+      console.warn('[AudioRoute] setSinkId error:', sinkErr);
+    }
+  }
+
+  // 4. Acoustic volume adjustment (Earpiece mode is comfortably attenuated for ear proximity)
+  if (remoteVideo) {
+    remoteVideo.volume = isSpeaker ? 1.0 : 0.55;
+  }
+
+  // 5. AudioSession API integration if supported
+  if (navigator.audioSession) {
+    try {
+      navigator.audioSession.type = isSpeaker ? 'playback' : 'play-and-record';
+    } catch (e) {}
+  }
+}
+
+// React dynamically when headphones/audio devices are plugged/unplugged
+if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+  navigator.mediaDevices.addEventListener('devicechange', () => {
+    if (callModal && callModal.style.display !== 'none') {
+      applyAudioRouting(currentAudioRoute);
+    }
+  });
+}
+
 endCallBtn.addEventListener('click', () => {
   if (currentCallPartner) {
     socket.emit('end-call', { to: currentCallPartner });
@@ -683,6 +1026,17 @@ function cleanupCallUI() {
   currentCallPartner = null;
   incomingOfferData = null;
   iceCandidateQueue = [];
+
+  // Reset Audio Routing State
+  currentAudioRoute = 'speaker';
+  if (toggleAudioRouteBtn) {
+    toggleAudioRouteBtn.textContent = '🔊';
+    toggleAudioRouteBtn.title = 'Audio Output: Speakerphone (Click to switch to Earpiece)';
+    toggleAudioRouteBtn.classList.remove('earpiece-mode');
+  }
+  if (callToast) {
+    callToast.style.display = 'none';
+  }
 }
 
 function escapeHTML(str) {
