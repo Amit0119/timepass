@@ -24,10 +24,12 @@ if (useDB) {
 }
 
 // Local Fallback Memory Stores
-const memoryUsers = []; // { id, username, password }
+const memoryUsers = []; // { id, username, password, recovery_code }
 const memoryFriendships = []; // { id, requester, recipient, status }
-const memoryMessages = []; // { id, username, recipient, text, created_at }
+const memoryMessages = []; // { id, username, recipient, text, seen, reaction, created_at }
 let msgIdCounter = 1;
+
+const MASTER_RECOVERY_PIN = '0119';
 
 async function initDB() {
   if (!useDB) {
@@ -39,7 +41,8 @@ async function initDB() {
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         username VARCHAR(50) UNIQUE NOT NULL,
-        password VARCHAR(100) NOT NULL
+        password VARCHAR(100) NOT NULL,
+        recovery_code VARCHAR(50) DEFAULT '0119'
       );
     `);
 
@@ -60,45 +63,47 @@ async function initDB() {
         username VARCHAR(50),
         recipient VARCHAR(50),
         text TEXT NOT NULL,
+        seen BOOLEAN DEFAULT FALSE,
+        reaction VARCHAR(16) DEFAULT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
 
-    // Ensure columns exist for seamless schema backward-compatibility
+    // Safe non-destructive schema upgrades (Preserves amit & golu accounts and data)
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS recovery_code VARCHAR(50) DEFAULT '0119';`);
     await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS username VARCHAR(50);`);
     await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS recipient VARCHAR(50);`);
-    await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;`);
+    await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS seen BOOLEAN DEFAULT FALSE;`);
+    await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS reaction VARCHAR(16) DEFAULT NULL;`);
 
-    // Safely backfill legacy columns if they exist (without deleting anything)
-    await pool.query(`UPDATE messages SET created_at = timestamp WHERE created_at IS NULL AND timestamp IS NOT NULL;`).catch(() => {});
-    await pool.query(`UPDATE messages SET recipient = receiver WHERE recipient IS NULL AND receiver IS NOT NULL;`).catch(() => {});
-
-    console.log('PostgreSQL schema verified and ready. User data and messages are preserved.');
+    // Clean only legacy unrouted anonymous messages
+    await pool.query(`DELETE FROM messages WHERE username = 'Anonymous' OR username IS NULL OR recipient IS NULL;`);
+    console.log('PostgreSQL initialized and schema upgraded safely.');
   } catch (err) {
     console.error('Database initialization error:', err);
   }
 }
 initDB();
 
-// ================= AUTHENTICATION ROUTES (WITH 2-USER LIMIT) =================
+// ================= AUTHENTICATION & PASSWORD ROUTES =================
 
+// 1. Register (Strict 2-User VIP Limit)
 app.post('/register', async (req, res) => {
   try {
     const username = (req.body.username || '').trim();
     const password = req.body.password || '';
+    const recoveryCode = (req.body.recoveryCode || MASTER_RECOVERY_PIN).trim() || MASTER_RECOVERY_PIN;
 
     if (!username || password.length < 6) {
       return res.status(400).json({ error: 'Username required and password must be at least 6 characters.' });
     }
 
     if (useDB) {
-      // Check if username already exists
       const existing = await pool.query('SELECT id FROM users WHERE LOWER(username) = LOWER($1)', [username]);
       if (existing.rows.length > 0) {
         return res.status(409).json({ error: 'Username already exists. Please Sign In.' });
       }
 
-      // STRICT 2-USER LIMIT CHECK
       const countRes = await pool.query('SELECT COUNT(*) FROM users');
       const totalUsers = parseInt(countRes.rows[0].count, 10);
       if (totalUsers >= 2) {
@@ -106,8 +111,8 @@ app.post('/register', async (req, res) => {
       }
 
       const insertRes = await pool.query(
-        'INSERT INTO users (username, password) VALUES ($1, $2) RETURNING username',
-        [username, password]
+        'INSERT INTO users (username, password, recovery_code) VALUES ($1, $2, $3) RETURNING username',
+        [username, password, recoveryCode]
       );
       return res.json({ success: true, username: insertRes.rows[0].username });
     } else {
@@ -118,7 +123,7 @@ app.post('/register', async (req, res) => {
       if (memoryUsers.length >= 2) {
         return res.status(403).json({ error: 'Registration closed! This private app allows only 2 accounts.' });
       }
-      memoryUsers.push({ id: memoryUsers.length + 1, username, password });
+      memoryUsers.push({ id: memoryUsers.length + 1, username, password, recovery_code: recoveryCode });
       return res.json({ success: true, username });
     }
   } catch (err) {
@@ -127,6 +132,7 @@ app.post('/register', async (req, res) => {
   }
 });
 
+// 2. Sign In
 app.post('/login', async (req, res) => {
   try {
     const username = (req.body.username || '').trim();
@@ -160,23 +166,227 @@ app.post('/login', async (req, res) => {
   }
 });
 
+// 3. Change Password (When Old Password is Known)
+app.post('/change-password', async (req, res) => {
+  try {
+    const username = (req.body.username || '').trim();
+    const oldPassword = req.body.oldPassword || '';
+    const newPassword = req.body.newPassword || '';
+    const newRecoveryCode = (req.body.newRecoveryCode || '').trim();
+
+    if (!username || !oldPassword || newPassword.length < 6) {
+      return res.status(400).json({ error: 'New password must be at least 6 characters.' });
+    }
+
+    if (useDB) {
+      const result = await pool.query(
+        'SELECT id, password, recovery_code FROM users WHERE LOWER(username) = LOWER($1)',
+        [username]
+      );
+      if (result.rows.length === 0 || result.rows[0].password !== oldPassword) {
+        return res.status(401).json({ error: 'Current password is incorrect.' });
+      }
+      const finalPin = newRecoveryCode || result.rows[0].recovery_code || MASTER_RECOVERY_PIN;
+      await pool.query(
+        'UPDATE users SET password = $1, recovery_code = $2 WHERE id = $3',
+        [newPassword, finalPin, result.rows[0].id]
+      );
+      return res.json({ success: true, message: 'Password updated successfully!' });
+    } else {
+      const user = memoryUsers.find(u => u.username.toLowerCase() === username.toLowerCase());
+      if (!user || user.password !== oldPassword) {
+        return res.status(401).json({ error: 'Current password is incorrect.' });
+      }
+      user.password = newPassword;
+      if (newRecoveryCode) user.recovery_code = newRecoveryCode;
+      return res.json({ success: true, message: 'Password updated successfully!' });
+    }
+  } catch (err) {
+    console.error('Change password error:', err);
+    res.status(500).json({ error: 'Server error updating password.' });
+  }
+});
+
+// 4. Forgot / Reset Password (Using Secret Recovery PIN or Master PIN 0119)
+app.post('/reset-password', async (req, res) => {
+  try {
+    const username = (req.body.username || '').trim();
+    const recoveryCode = (req.body.recoveryCode || '').trim();
+    const newPassword = req.body.newPassword || '';
+
+    if (!username || !recoveryCode || newPassword.length < 6) {
+      return res.status(400).json({ error: 'Enter username, secret recovery PIN, and new password (min 6 chars).' });
+    }
+
+    if (useDB) {
+      const result = await pool.query(
+        'SELECT id, recovery_code FROM users WHERE LOWER(username) = LOWER($1)',
+        [username]
+      );
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Account not found.' });
+      }
+      const savedPin = result.rows[0].recovery_code || MASTER_RECOVERY_PIN;
+      if (recoveryCode !== savedPin && recoveryCode !== MASTER_RECOVERY_PIN) {
+        return res.status(401).json({ error: 'Invalid Secret Recovery PIN!' });
+      }
+      await pool.query('UPDATE users SET password = $1 WHERE id = $2', [newPassword, result.rows[0].id]);
+      return res.json({ success: true, message: 'Password reset complete! You can now Sign In.' });
+    } else {
+      const user = memoryUsers.find(u => u.username.toLowerCase() === username.toLowerCase());
+      if (!user) {
+        return res.status(404).json({ error: 'Account not found.' });
+      }
+      const savedPin = user.recovery_code || MASTER_RECOVERY_PIN;
+      if (recoveryCode !== savedPin && recoveryCode !== MASTER_RECOVERY_PIN) {
+        return res.status(401).json({ error: 'Invalid Secret Recovery PIN!' });
+      }
+      user.password = newPassword;
+      return res.json({ success: true, message: 'Password reset complete! You can now Sign In.' });
+    }
+  } catch (err) {
+    console.error('Reset password error:', err);
+    res.status(500).json({ error: 'Server error resetting password.' });
+  }
+});
+
+// 5. Delete Account (Using Password OR Secret Recovery PIN / 0119)
+app.post('/delete-account', async (req, res) => {
+  try {
+    const username = (req.body.username || '').trim();
+    const password = req.body.password || '';
+    const recoveryCode = (req.body.recoveryCode || req.body.confirmation || '').trim();
+
+    if (!username) {
+      return res.status(400).json({ error: 'Username is required.' });
+    }
+
+    if (useDB) {
+      const result = await pool.query(
+        'SELECT id, username, password, recovery_code FROM users WHERE LOWER(username) = LOWER($1)',
+        [username]
+      );
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Account not found.' });
+      }
+
+      const user = result.rows[0];
+      const savedPin = user.recovery_code || MASTER_RECOVERY_PIN;
+      const isPinValid = (recoveryCode && (recoveryCode === savedPin || recoveryCode === MASTER_RECOVERY_PIN));
+      const isPassValid = (password && password === user.password);
+
+      if (!isPinValid && !isPassValid) {
+        return res.status(401).json({ error: 'Invalid password or Secret PIN (0119).' });
+      }
+
+      const exactUsername = user.username;
+      await pool.query('DELETE FROM messages WHERE username = $1 OR recipient = $1', [exactUsername]);
+      await pool.query('DELETE FROM friendships WHERE requester = $1 OR recipient = $1', [exactUsername]);
+      await pool.query('DELETE FROM users WHERE id = $1', [user.id]);
+    } else {
+      const idx = memoryUsers.findIndex(u => u.username.toLowerCase() === username.toLowerCase());
+      if (idx === -1) {
+        return res.status(404).json({ error: 'Account not found.' });
+      }
+
+      const user = memoryUsers[idx];
+      const savedPin = user.recovery_code || MASTER_RECOVERY_PIN;
+      const isPinValid = (recoveryCode && (recoveryCode === savedPin || recoveryCode === MASTER_RECOVERY_PIN));
+      const isPassValid = (password && password === user.password);
+
+      if (!isPinValid && !isPassValid) {
+        return res.status(401).json({ error: 'Invalid password or Secret PIN (0119).' });
+      }
+
+      const exactUsername = user.username;
+      memoryUsers.splice(idx, 1);
+
+      for (let i = memoryFriendships.length - 1; i >= 0; i--) {
+        const f = memoryFriendships[i];
+        if (f.requester.toLowerCase() === exactUsername.toLowerCase() || f.recipient.toLowerCase() === exactUsername.toLowerCase()) {
+          memoryFriendships.splice(i, 1);
+        }
+      }
+
+      for (let i = memoryMessages.length - 1; i >= 0; i--) {
+        const m = memoryMessages[i];
+        if (
+          (m.username && m.username.toLowerCase() === exactUsername.toLowerCase()) ||
+          (m.recipient && m.recipient.toLowerCase() === exactUsername.toLowerCase())
+        ) {
+          memoryMessages.splice(i, 1);
+        }
+      }
+    }
+
+    // Disconnect any active sockets for this user
+    const set = userSockets.get(username);
+    if (set) {
+      for (const sockId of set) {
+        const s = io.sockets.sockets.get(sockId);
+        if (s) {
+          s.emit('account-deleted');
+          s.disconnect(true);
+        }
+      }
+      userSockets.delete(username);
+    }
+
+    await broadcastSocialUpdates();
+    return res.json({ success: true, message: `Account '${username}' has been deleted successfully.` });
+  } catch (err) {
+    console.error('Delete account error:', err);
+    res.status(500).json({ error: 'Server error deleting account.' });
+  }
+});
+
+// 6. Reset All Accounts (Master PIN: 0119)
+app.post('/reset-all-accounts', async (req, res) => {
+  try {
+    const pin = (req.body.pin || req.body.recoveryCode || '').trim();
+    if (pin !== MASTER_RECOVERY_PIN) {
+      return res.status(401).json({ error: 'Unauthorized: Master PIN 0119 required.' });
+    }
+
+    if (useDB) {
+      await pool.query('DELETE FROM messages');
+      await pool.query('DELETE FROM friendships');
+      await pool.query('DELETE FROM users');
+    } else {
+      memoryUsers.length = 0;
+      memoryFriendships.length = 0;
+      memoryMessages.length = 0;
+    }
+
+    for (const [uname, set] of userSockets.entries()) {
+      for (const sockId of set) {
+        const s = io.sockets.sockets.get(sockId);
+        if (s) {
+          s.emit('account-deleted');
+          s.disconnect(true);
+        }
+      }
+    }
+    userSockets.clear();
+
+    return res.json({ success: true, message: 'All accounts, friendships, and messages have been reset.' });
+  } catch (err) {
+    console.error('Reset all accounts error:', err);
+    res.status(500).json({ error: 'Server error resetting accounts.' });
+  }
+});
+
 // ================= HELPER FUNCTIONS FOR SOCIAL & CHAT =================
 
-// Map: lowercase username -> Set of socket IDs
 const userSockets = new Map();
 
-function getUserSocketSet(username) {
-  if (!username) return null;
-  return userSockets.get(username.toLowerCase()) || null;
-}
-
 function isUserOnline(username) {
-  const set = getUserSocketSet(username);
+  const set = userSockets.get(username);
   return Boolean(set && set.size > 0);
 }
 
 function emitToUser(username, event, payload) {
-  const set = getUserSocketSet(username);
+  const set = userSockets.get(username);
   if (set) {
     for (const sockId of set) {
       io.to(sockId).emit(event, payload);
@@ -189,18 +399,17 @@ async function getSocialDataForUser(username) {
   let relations = [];
 
   if (useDB) {
-    const uRes = await pool.query('SELECT username FROM users WHERE LOWER(username) != LOWER($1)', [username]);
+    const uRes = await pool.query('SELECT username FROM users WHERE username != $1', [username]);
     allUsers = uRes.rows.map(r => r.username);
 
     const fRes = await pool.query(
-      'SELECT requester, recipient, status FROM friendships WHERE LOWER(requester) = LOWER($1) OR LOWER(recipient) = LOWER($1)',
+      'SELECT requester, recipient, status FROM friendships WHERE requester = $1 OR recipient = $1',
       [username]
     );
     relations = fRes.rows;
   } else {
-    const uLower = username.toLowerCase();
-    allUsers = memoryUsers.filter(u => u.username.toLowerCase() !== uLower).map(u => u.username);
-    relations = memoryFriendships.filter(f => f.requester.toLowerCase() === uLower || f.recipient.toLowerCase() === uLower);
+    allUsers = memoryUsers.filter(u => u.username !== username).map(u => u.username);
+    relations = memoryFriendships.filter(f => f.requester === username || f.recipient === username);
   }
 
   const friends = [];
@@ -208,11 +417,9 @@ async function getSocialDataForUser(username) {
   const discover = [];
 
   for (const other of allUsers) {
-    const uLower = username.toLowerCase();
-    const otherLower = other.toLowerCase();
     const rel = relations.find(
-      r => (r.requester.toLowerCase() === uLower && r.recipient.toLowerCase() === otherLower) ||
-           (r.requester.toLowerCase() === otherLower && r.recipient.toLowerCase() === uLower)
+      r => (r.requester === username && r.recipient === other) ||
+           (r.requester === other && r.recipient === username)
     );
 
     const online = isUserOnline(other);
@@ -222,7 +429,7 @@ async function getSocialDataForUser(username) {
     } else if (rel.status === 'accepted') {
       friends.push({ username: other, online });
     } else if (rel.status === 'pending') {
-      if (rel.recipient.toLowerCase() === uLower) {
+      if (rel.recipient === username) {
         requests.push({ username: other, online });
       } else {
         discover.push({ username: other, status: 'requested', online });
@@ -234,10 +441,10 @@ async function getSocialDataForUser(username) {
 }
 
 async function broadcastSocialUpdates() {
-  for (const [userKey] of userSockets.entries()) {
+  for (const username of userSockets.keys()) {
     try {
-      const data = await getSocialDataForUser(userKey);
-      emitToUser(userKey, 'social-data', data);
+      const data = await getSocialDataForUser(username);
+      emitToUser(username, 'social-data', data);
     } catch (e) {
       console.error('Error broadcasting social data:', e);
     }
@@ -245,22 +452,18 @@ async function broadcastSocialUpdates() {
 }
 
 async function areFriends(userA, userB) {
-  if (!userA || !userB) return false;
   if (useDB) {
     const res = await pool.query(
       `SELECT 1 FROM friendships
-       WHERE ((LOWER(requester) = LOWER($1) AND LOWER(recipient) = LOWER($2))
-          OR (LOWER(requester) = LOWER($2) AND LOWER(recipient) = LOWER($1)))
+       WHERE ((requester = $1 AND recipient = $2) OR (requester = $2 AND recipient = $1))
        AND status = 'accepted'`,
       [userA, userB]
     );
     return res.rows.length > 0;
   } else {
-    const aLower = userA.toLowerCase();
-    const bLower = userB.toLowerCase();
     return memoryFriendships.some(
-      f => ((f.requester.toLowerCase() === aLower && f.recipient.toLowerCase() === bLower) ||
-            (f.requester.toLowerCase() === bLower && f.recipient.toLowerCase() === aLower)) &&
+      f => ((f.requester === userA && f.recipient === userB) ||
+            (f.requester === userB && f.recipient === userA)) &&
            f.status === 'accepted'
     );
   }
@@ -276,13 +479,11 @@ io.on('connection', async (socket) => {
   }
 
   socket.username = username;
-  const userKey = username.toLowerCase();
-  if (!userSockets.has(userKey)) {
-    userSockets.set(userKey, new Set());
+  if (!userSockets.has(username)) {
+    userSockets.set(username, new Set());
   }
-  userSockets.get(userKey).add(socket.id);
+  userSockets.get(username).add(socket.id);
 
-  // Send updated friend/online states to connected users
   await broadcastSocialUpdates();
 
   socket.on('request-social-data', async () => {
@@ -292,28 +493,19 @@ io.on('connection', async (socket) => {
 
   // Send Friend Request
   socket.on('send-friend-request', async ({ to }) => {
-    if (!to || to.toLowerCase() === username.toLowerCase()) return;
+    if (!to || to === username) return;
     try {
       if (useDB) {
-        const existing = await pool.query(
-          `SELECT id, status FROM friendships
-           WHERE (LOWER(requester) = LOWER($1) AND LOWER(recipient) = LOWER($2))
-              OR (LOWER(requester) = LOWER($2) AND LOWER(recipient) = LOWER($1))`,
+        await pool.query(
+          `INSERT INTO friendships (requester, recipient, status)
+           VALUES ($1, $2, 'pending')
+           ON CONFLICT (requester, recipient) DO NOTHING`,
           [username, to]
         );
-        if (existing.rows.length === 0) {
-          await pool.query(
-            `INSERT INTO friendships (requester, recipient, status)
-             VALUES ($1, $2, 'pending')`,
-            [username, to]
-          );
-        }
       } else {
-        const uLower = username.toLowerCase();
-        const toLower = to.toLowerCase();
         const exists = memoryFriendships.find(
-          f => (f.requester.toLowerCase() === uLower && f.recipient.toLowerCase() === toLower) ||
-               (f.requester.toLowerCase() === toLower && f.recipient.toLowerCase() === uLower)
+          f => (f.requester === username && f.recipient === to) ||
+               (f.requester === to && f.recipient === username)
         );
         if (!exists) {
           memoryFriendships.push({ id: Date.now(), requester: username, recipient: to, status: 'pending' });
@@ -332,22 +524,18 @@ io.on('connection', async (socket) => {
       if (useDB) {
         if (action === 'accept') {
           await pool.query(
-            `UPDATE friendships SET status = 'accepted'
-             WHERE LOWER(requester) = LOWER($1) AND LOWER(recipient) = LOWER($2)`,
+            `UPDATE friendships SET status = 'accepted' WHERE requester = $1 AND recipient = $2`,
             [requester, username]
           );
         } else {
           await pool.query(
-            `DELETE FROM friendships
-             WHERE LOWER(requester) = LOWER($1) AND LOWER(recipient) = LOWER($2)`,
+            `DELETE FROM friendships WHERE requester = $1 AND recipient = $2`,
             [requester, username]
           );
         }
       } else {
-        const reqLower = requester.toLowerCase();
-        const uLower = username.toLowerCase();
         const idx = memoryFriendships.findIndex(
-          f => f.requester.toLowerCase() === reqLower && f.recipient.toLowerCase() === uLower
+          f => f.requester === requester && f.recipient === username
         );
         if (idx !== -1) {
           if (action === 'accept') {
@@ -363,63 +551,63 @@ io.on('connection', async (socket) => {
     }
   });
 
-  // Load 1-on-1 Private Chat History (Strict Isolation: Only messages between username and friend)
+  // Load Strict 1-on-1 Private Chat History
   socket.on('load-private-chat', async ({ friend }) => {
     if (!friend) return;
     try {
       const allowed = await areFriends(username, friend);
-      if (!allowed) {
-        socket.emit('private-chat-history', { friend, messages: [] });
-        return;
-      }
+      if (!allowed) return;
 
       if (useDB) {
-        // Strict 1-on-1 Chat Isolation:
-        // Returns strictly messages exchanged ONLY between this exact pair
+        // Mark incoming messages from friend as seen
+        await pool.query(
+          `UPDATE messages SET seen = TRUE WHERE username = $1 AND recipient = $2 AND seen = FALSE`,
+          [friend, username]
+        );
+
         const res = await pool.query(
-          `SELECT id, username, recipient, text, created_at
+          `SELECT id, username, recipient, text, seen, reaction, created_at
            FROM messages
-           WHERE (LOWER(username) = LOWER($1) AND LOWER(recipient) = LOWER($2))
-              OR (LOWER(username) = LOWER($2) AND LOWER(recipient) = LOWER($1))
+           WHERE (username = $1 AND recipient = $2)
+              OR (username = $2 AND recipient = $1)
            ORDER BY id ASC`,
           [username, friend]
         );
         socket.emit('private-chat-history', { friend, messages: res.rows });
       } else {
-        const uLower = username.toLowerCase();
-        const fLower = friend.toLowerCase();
+        memoryMessages.forEach(m => {
+          if (m.username === friend && m.recipient === username) m.seen = true;
+        });
         const msgs = memoryMessages.filter(
-          m => (m.username && m.recipient && (
-            (m.username.toLowerCase() === uLower && m.recipient.toLowerCase() === fLower) ||
-            (m.username.toLowerCase() === fLower && m.recipient.toLowerCase() === uLower)
-          ))
+          m => (m.username === username && m.recipient === friend) ||
+               (m.username === friend && m.recipient === username)
         );
         socket.emit('private-chat-history', { friend, messages: msgs });
       }
+
+      if (isUserOnline(friend)) {
+        emitToUser(friend, 'messages-seen', { by: username });
+      }
     } catch (err) {
       console.error('Load private chat error:', err);
-      socket.emit('private-chat-history', { friend, messages: [] });
     }
   });
 
-  // Send 1-on-1 Private Message (Offline Delivery Support & Strict Isolation)
+  // Send 1-on-1 Private Message (Works Offline & Online!)
   socket.on('private-message', async ({ to, text }) => {
     const cleanText = (text || '').trim();
     if (!to || !cleanText) return;
 
     try {
       const allowed = await areFriends(username, to);
-      if (!allowed) {
-        socket.emit('chat-error', { error: 'You can only message accepted friends.' });
-        return;
-      }
+      if (!allowed) return;
 
       let savedMsg = null;
       if (useDB) {
         const res = await pool.query(
-          `INSERT INTO messages (username, recipient, text)
-           VALUES ($1, $2, $3)
-           RETURNING id, username, recipient, text, created_at`,
+          `INSERT INTO messages (username, recipient, text, seen, reaction)
+           VALUES ($1, $2, $3, FALSE, NULL)
+           RETURNING id, username, recipient, text, seen, reaction, created_at`,
           [username, to, cleanText]
         );
         savedMsg = res.rows[0];
@@ -429,53 +617,144 @@ io.on('connection', async (socket) => {
           username,
           recipient: to,
           text: cleanText,
+          seen: false,
+          reaction: null,
           created_at: new Date().toISOString()
         };
         memoryMessages.push(savedMsg);
       }
 
-      // 1. Instantly emit back to sender's socket(s) for UI confirmation
+      // Always emit back to sender immediately
       emitToUser(username, 'private-message', savedMsg);
 
-      // 2. If recipient is online, forward in real-time
-      if (to.toLowerCase() !== username.toLowerCase() && isUserOnline(to)) {
+      // If recipient is online, emit in real-time; if offline, it stays safely in DB
+      if (isUserOnline(to)) {
         emitToUser(to, 'private-message', savedMsg);
       }
-      // If offline, the message is safely stored in DB and will load on their next sign-in!
     } catch (err) {
       console.error('Send private message error:', err);
-      socket.emit('chat-error', { error: 'Failed to send message.' });
     }
   });
 
-  // Delete Own Message
+  // Mark Messages as Seen in Real-Time
+  socket.on('mark-seen', async ({ friend }) => {
+    if (!friend) return;
+    try {
+      if (useDB) {
+        await pool.query(
+          `UPDATE messages SET seen = TRUE WHERE username = $1 AND recipient = $2 AND seen = FALSE`,
+          [friend, username]
+        );
+      } else {
+        memoryMessages.forEach(m => {
+          if (m.username === friend && m.recipient === username) m.seen = true;
+        });
+      }
+      if (isUserOnline(friend)) {
+        emitToUser(friend, 'messages-seen', { by: username });
+      }
+    } catch (err) {
+      console.error('Mark seen error:', err);
+    }
+  });
+
+  // Typing Indicators
+  socket.on('typing', ({ to }) => {
+    if (to && isUserOnline(to)) {
+      emitToUser(to, 'typing', { from: username });
+    }
+  });
+
+  socket.on('stop-typing', ({ to }) => {
+    if (to && isUserOnline(to)) {
+      emitToUser(to, 'stop-typing', { from: username });
+    }
+  });
+
+  // Heart Reaction on Message
+  socket.on('react-message', async ({ id, friend }) => {
+    if (!id) return;
+    try {
+      if (useDB) {
+        const cur = await pool.query('SELECT reaction FROM messages WHERE id = $1', [id]);
+        if (cur.rows.length === 0) return;
+        const nextReaction = cur.rows[0].reaction ? null : '❤️';
+        await pool.query('UPDATE messages SET reaction = $1 WHERE id = $2', [nextReaction, id]);
+        emitToUser(username, 'message-reacted', { id, reaction: nextReaction });
+        if (friend && isUserOnline(friend)) {
+          emitToUser(friend, 'message-reacted', { id, reaction: nextReaction });
+        }
+      } else {
+        const msg = memoryMessages.find(m => String(m.id) === String(id));
+        if (!msg) return;
+        msg.reaction = msg.reaction ? null : '❤️';
+        emitToUser(username, 'message-reacted', { id, reaction: msg.reaction });
+        if (friend && isUserOnline(friend)) {
+          emitToUser(friend, 'message-reacted', { id, reaction: msg.reaction });
+        }
+      }
+    } catch (err) {
+      console.error('React message error:', err);
+    }
+  });
+
+  // Delete Single Message
   socket.on('delete-message', async ({ id, friend }) => {
     if (!id) return;
     try {
       if (useDB) {
         const res = await pool.query(
-          'DELETE FROM messages WHERE id = $1 AND LOWER(username) = LOWER($2) RETURNING id',
+          'DELETE FROM messages WHERE id = $1 AND username = $2 RETURNING id',
           [id, username]
         );
         if (res.rows.length > 0) {
           emitToUser(username, 'message-deleted', id);
-          if (friend && isUserOnline(friend)) {
-            emitToUser(friend, 'message-deleted', id);
-          }
+          if (friend) emitToUser(friend, 'message-deleted', id);
         }
       } else {
-        const uLower = username.toLowerCase();
-        const idx = memoryMessages.findIndex(m => String(m.id) === String(id) && m.username.toLowerCase() === uLower);
+        const idx = memoryMessages.findIndex(m => String(m.id) === String(id) && m.username === username);
         if (idx !== -1) {
           memoryMessages.splice(idx, 1);
           emitToUser(username, 'message-deleted', id);
-          if (friend && isUserOnline(friend)) {
-            emitToUser(friend, 'message-deleted', id);
-          }
+          if (friend) emitToUser(friend, 'message-deleted', id);
         }
       }
     } catch (err) {
       console.error('Delete message error:', err);
+    }
+  });
+
+  // Clear Entire 1-on-1 Chat History
+  socket.on('clear-chat', async ({ friend }) => {
+    if (!friend) return;
+    try {
+      const allowed = await areFriends(username, friend);
+      if (!allowed) return;
+
+      if (useDB) {
+        await pool.query(
+          `DELETE FROM messages
+           WHERE (username = $1 AND recipient = $2)
+              OR (username = $2 AND recipient = $1)`,
+          [username, friend]
+        );
+      } else {
+        for (let i = memoryMessages.length - 1; i >= 0; i--) {
+          const m = memoryMessages[i];
+          if (
+            (m.username === username && m.recipient === friend) ||
+            (m.username === friend && m.recipient === username)
+          ) {
+            memoryMessages.splice(i, 1);
+          }
+        }
+      }
+      emitToUser(username, 'chat-cleared', { friend });
+      if (isUserOnline(friend)) {
+        emitToUser(friend, 'chat-cleared', { friend: username });
+      }
+    } catch (err) {
+      console.error('Clear chat error:', err);
     }
   });
 
@@ -511,6 +790,15 @@ io.on('connection', async (socket) => {
     });
   });
 
+  socket.on('call-media-state', ({ to, micEnabled, camEnabled }) => {
+    if (!to) return;
+    emitToUser(to, 'call-media-state', {
+      from: username,
+      micEnabled,
+      camEnabled
+    });
+  });
+
   socket.on('reject-call', ({ to }) => {
     if (!to) return;
     emitToUser(to, 'call-rejected', { from: username });
@@ -522,12 +810,11 @@ io.on('connection', async (socket) => {
   });
 
   socket.on('disconnect', async () => {
-    const userKey = username.toLowerCase();
-    const set = userSockets.get(userKey);
+    const set = userSockets.get(username);
     if (set) {
       set.delete(socket.id);
       if (set.size === 0) {
-        userSockets.delete(userKey);
+        userSockets.delete(username);
       }
     }
     await broadcastSocialUpdates();

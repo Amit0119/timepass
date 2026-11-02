@@ -2,28 +2,28 @@ let socket = null;
 let currentUser = null;
 let activeFriend = null;
 let socialState = { friends: [], requests: [], discover: [] };
+let typingTimeout = null;
 
-// UX & Notification State
-let unreadCounts = {};
-let originalDocumentTitle = document.title || 'Private Space 💜';
-let titleBlinkInterval = null;
-let notifBannerTimeout = null;
-let audioCtx = null;
-let currentAudioRoute = 'speaker'; // 'speaker' | 'earpiece'
-let callToastTimeout = null;
+// User Preferences (Notification sound OFF by default as requested!)
+const userSettings = {
+  soundEnabled: localStorage.getItem('ps_sound') === 'true', // default false
+  vibrateEnabled: localStorage.getItem('ps_vibrate') !== 'false', // default true
+  autoLogin: localStorage.getItem('ps_autologin') !== 'false' // default true
+};
 
-// Notification Sound Toggle: CRITICAL - MUST be set to OFF by default (initial state)
-const storedSoundPref = localStorage.getItem('sound_notifications_enabled');
-let soundNotificationsEnabled = storedSoundPref === 'true'; // strictly false by default
-
-// WebRTC State
+// WebRTC & Calling State
 let peerConnection = null;
 let localStream = null;
 let currentCallPartner = null;
 let incomingOfferData = null;
 let isCurrentCallVideo = true;
+let currentFacingMode = 'user'; // 'user' (front) or 'environment' (back)
+let isSpeakerphone = false; // false = Earpiece (Normal Call), true = Speakerphone
 let iceCandidateQueue = [];
 let callTimerInterval = null;
+let callRingTimeout = null;
+let toneInterval = null;
+let audioCtx = null;
 let callSeconds = 0;
 
 const rtcConfig = {
@@ -36,18 +36,26 @@ const rtcConfig = {
 // DOM Elements - Auth
 const authContainer = document.getElementById('auth-container');
 const chatContainer = document.getElementById('chat-container');
+const authTabsBox = document.getElementById('auth-tabs-box');
 const tabLogin = document.getElementById('tab-login');
 const tabRegister = document.getElementById('tab-register');
 const authForm = document.getElementById('auth-form');
 const authUsername = document.getElementById('auth-username');
 const authPassword = document.getElementById('auth-password');
+const passwordLabel = document.getElementById('password-label');
+const recoveryGroup = document.getElementById('recovery-group');
+const recoveryLabel = document.getElementById('recovery-label');
+const authRecovery = document.getElementById('auth-recovery');
 const togglePasswordBtn = document.getElementById('toggle-password');
 const eyeOpen = document.getElementById('eye-open');
 const eyeClosed = document.getElementById('eye-closed');
 const authSubmitBtn = document.getElementById('auth-submit-btn');
+const forgotPasswordBtn = document.getElementById('forgot-password-btn');
+const deleteAccountLinkBtn = document.getElementById('delete-account-link-btn');
+const backToLoginBtn = document.getElementById('back-to-login-btn');
 const authFeedback = document.getElementById('auth-feedback');
 
-// DOM Elements - Main Layout & Sidebar
+// DOM Elements - Sidebar & Header
 const sidebar = document.getElementById('sidebar');
 const sidebarBackdrop = document.getElementById('sidebar-backdrop');
 const toggleSidebarBtn = document.getElementById('toggle-sidebar-btn');
@@ -55,6 +63,8 @@ const closeSidebarBtn = document.getElementById('close-sidebar-btn');
 const emptyOpenMenuBtn = document.getElementById('empty-open-menu-btn');
 const myAvatar = document.getElementById('my-avatar');
 const myUsername = document.getElementById('my-username');
+const openSettingsBtn = document.getElementById('open-settings-btn');
+const headerSettingsBtn = document.getElementById('header-settings-btn');
 const logoutBtn = document.getElementById('logout-btn');
 
 const sideTabs = document.querySelectorAll('.side-tab');
@@ -79,6 +89,20 @@ const chatForm = document.getElementById('chat-form');
 const messageInput = document.getElementById('message-input');
 const sendBtn = document.getElementById('send-btn');
 
+// DOM Elements - Settings Modal
+const settingsModal = document.getElementById('settings-modal');
+const closeSettingsBtn = document.getElementById('close-settings-btn');
+const toggleSoundCheckbox = document.getElementById('toggle-sound');
+const toggleVibrateCheckbox = document.getElementById('toggle-vibrate');
+const toggleAutologinCheckbox = document.getElementById('toggle-autologin');
+const enablePushBtn = document.getElementById('enable-push-btn');
+const clearChatBtn = document.getElementById('clear-chat-btn');
+const changePassForm = document.getElementById('change-pass-form');
+const cpOld = document.getElementById('cp-old');
+const cpNew = document.getElementById('cp-new');
+const cpPin = document.getElementById('cp-pin');
+const cpFeedback = document.getElementById('cp-feedback');
+
 // DOM Elements - Calling
 const incomingOverlay = document.getElementById('incoming-call-overlay');
 const incomingCallerAvatar = document.getElementById('incoming-caller-avatar');
@@ -93,55 +117,171 @@ const outgoingCalleeName = document.getElementById('outgoing-callee-name');
 const cancelCallBtn = document.getElementById('cancel-call-btn');
 
 const callModal = document.getElementById('call-modal');
+const videoStage = document.getElementById('video-stage');
 const remoteVideo = document.getElementById('remote-video');
 const localVideo = document.getElementById('local-video');
 const localVideoWrap = document.getElementById('local-video-wrap');
 const audioPlaceholder = document.getElementById('audio-call-placeholder');
 const activeCallAvatar = document.getElementById('active-call-avatar');
 const activeCallUsername = document.getElementById('active-call-username');
+const audioModeLabel = document.getElementById('audio-mode-label');
+const remoteStatusPill = document.getElementById('remote-status-pill');
 const callTimerEl = document.getElementById('call-timer');
 const toggleMicBtn = document.getElementById('toggle-mic-btn');
 const toggleCamBtn = document.getElementById('toggle-cam-btn');
-const toggleAudioRouteBtn = document.getElementById('toggle-audio-route-btn');
+const flipCamBtn = document.getElementById('flip-cam-btn');
+const toggleSpeakerBtn = document.getElementById('toggle-speaker-btn');
 const endCallBtn = document.getElementById('end-call-btn');
-const callToast = document.getElementById('call-toast');
-const callToastIcon = document.getElementById('call-toast-icon');
-const callToastText = document.getElementById('call-toast-text');
 
-// DOM Elements - In-App Notification Banner
-const notifBanner = document.getElementById('msg-notification-banner');
-const notifAvatar = document.getElementById('notif-avatar');
-const notifSender = document.getElementById('notif-sender');
-const notifText = document.getElementById('notif-text');
-const notifCloseBtn = document.getElementById('notif-close-btn');
+let authMode = 'login'; // 'login' | 'register' | 'reset'
 
-// DOM Elements - Settings Modal & Notification Toggle
-const settingsBtn = document.getElementById('settings-btn');
-const headerSettingsBtn = document.getElementById('header-settings-btn');
-const settingsModal = document.getElementById('settings-modal');
-const closeSettingsBtn = document.getElementById('close-settings-btn');
-const saveSettingsBtn = document.getElementById('save-settings-btn');
-const toggleSoundNotifications = document.getElementById('toggle-sound-notifications');
+// Initialize Settings UI
+toggleSoundCheckbox.checked = userSettings.soundEnabled;
+toggleVibrateCheckbox.checked = userSettings.vibrateEnabled;
+toggleAutologinCheckbox.checked = userSettings.autoLogin;
 
-let authMode = 'login';
-
-// ================= AUTHENTICATION UI =================
-
-tabLogin.addEventListener('click', () => {
-  authMode = 'login';
-  tabLogin.classList.add('active');
-  tabRegister.classList.remove('active');
-  authSubmitBtn.textContent = 'Sign In';
-  hideFeedback();
+// Auto-Login Check on Page Load
+window.addEventListener('DOMContentLoaded', () => {
+  const savedUser = localStorage.getItem('ps_username');
+  if (userSettings.autoLogin && savedUser) {
+    enterApp(savedUser);
+  }
 });
 
-tabRegister.addEventListener('click', () => {
-  authMode = 'register';
-  tabRegister.classList.add('active');
-  tabLogin.classList.remove('active');
-  authSubmitBtn.textContent = 'Create Account';
+// ================= WEB AUDIO API SYNTHESIZER (NO EXTERNAL MP3 NEEDED) =================
+
+function getAudioContext() {
+  if (!audioCtx) {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (AudioContextClass) audioCtx = new AudioContextClass();
+  }
+  if (audioCtx && audioCtx.state === 'suspended') {
+    audioCtx.resume().catch(() => {});
+  }
+  return audioCtx;
+}
+
+function playMessageBeep() {
+  if (!userSettings.soundEnabled) return;
+  try {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(1320, ctx.currentTime + 0.12);
+    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.18);
+  } catch (e) {}
+}
+
+function startCallTone(type) {
+  stopCallTone();
+  const playPulse = () => {
+    try {
+      const ctx = getAudioContext();
+      if (!ctx) return;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      if (type === 'incoming') {
+        osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+        osc.frequency.setValueAtTime(880, ctx.currentTime + 0.2); // A5
+        gain.gain.setValueAtTime(0.22, ctx.currentTime);
+      } else {
+        // Outgoing phone ringback tone
+        osc.frequency.setValueAtTime(440, ctx.currentTime);
+        gain.gain.setValueAtTime(0.1, ctx.currentTime);
+      }
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.55);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.6);
+    } catch (e) {}
+
+    if (type === 'incoming' && userSettings.vibrateEnabled && navigator.vibrate) {
+      navigator.vibrate([300, 150, 300]);
+    }
+  };
+  playPulse();
+  toneInterval = setInterval(playPulse, 2000);
+}
+
+function stopCallTone() {
+  if (toneInterval) {
+    clearInterval(toneInterval);
+    toneInterval = null;
+  }
+  if (navigator.vibrate) navigator.vibrate(0);
+}
+
+// ================= AUTHENTICATION & FORGOT PASSWORD UI =================
+
+function setAuthMode(mode) {
+  authMode = mode;
   hideFeedback();
-});
+
+  if (mode === 'login') {
+    authTabsBox.style.display = 'flex';
+    tabLogin.classList.add('active');
+    tabRegister.classList.remove('active');
+    recoveryGroup.style.display = 'none';
+    passwordLabel.textContent = 'Password';
+    authPassword.required = true;
+    authSubmitBtn.textContent = 'Sign In';
+    authSubmitBtn.classList.remove('btn-danger');
+    forgotPasswordBtn.style.display = 'inline-block';
+    if (deleteAccountLinkBtn) deleteAccountLinkBtn.style.display = 'inline-block';
+    backToLoginBtn.style.display = 'none';
+  } else if (mode === 'register') {
+    authTabsBox.style.display = 'flex';
+    tabRegister.classList.add('active');
+    tabLogin.classList.remove('active');
+    recoveryGroup.style.display = 'block';
+    recoveryLabel.textContent = 'Set Secret Recovery PIN (Optional, default: 0119)';
+    passwordLabel.textContent = 'Password';
+    authPassword.required = true;
+    authSubmitBtn.textContent = 'Create Account';
+    authSubmitBtn.classList.remove('btn-danger');
+    forgotPasswordBtn.style.display = 'none';
+    if (deleteAccountLinkBtn) deleteAccountLinkBtn.style.display = 'none';
+    backToLoginBtn.style.display = 'none';
+  } else if (mode === 'reset') {
+    authTabsBox.style.display = 'none';
+    recoveryGroup.style.display = 'block';
+    recoveryLabel.textContent = 'Enter Secret Recovery PIN (or Master PIN: 0119)';
+    passwordLabel.textContent = 'New Password (min 6 chars)';
+    authPassword.required = true;
+    authSubmitBtn.textContent = 'Reset Password';
+    authSubmitBtn.classList.remove('btn-danger');
+    forgotPasswordBtn.style.display = 'none';
+    if (deleteAccountLinkBtn) deleteAccountLinkBtn.style.display = 'none';
+    backToLoginBtn.style.display = 'inline-block';
+  } else if (mode === 'delete') {
+    authTabsBox.style.display = 'none';
+    recoveryGroup.style.display = 'block';
+    recoveryLabel.textContent = 'Password OR Secret Recovery PIN (0119)';
+    passwordLabel.textContent = 'Password (or leave blank if using PIN above)';
+    authPassword.required = false;
+    authSubmitBtn.textContent = 'Permanently Delete Account';
+    authSubmitBtn.classList.add('btn-danger');
+    forgotPasswordBtn.style.display = 'none';
+    if (deleteAccountLinkBtn) deleteAccountLinkBtn.style.display = 'none';
+    backToLoginBtn.style.display = 'inline-block';
+  }
+}
+
+tabLogin.addEventListener('click', () => setAuthMode('login'));
+tabRegister.addEventListener('click', () => setAuthMode('register'));
+forgotPasswordBtn.addEventListener('click', () => setAuthMode('reset'));
+if (deleteAccountLinkBtn) deleteAccountLinkBtn.addEventListener('click', () => setAuthMode('delete'));
+backToLoginBtn.addEventListener('click', () => setAuthMode('login'));
 
 togglePasswordBtn.addEventListener('click', () => {
   const isPass = authPassword.type === 'password';
@@ -150,9 +290,9 @@ togglePasswordBtn.addEventListener('click', () => {
   eyeClosed.style.display = isPass ? 'block' : 'none';
 });
 
-function showFeedback(msg) {
+function showFeedback(msg, type = 'error') {
   authFeedback.textContent = msg;
-  authFeedback.className = 'auth-feedback error';
+  authFeedback.className = `auth-feedback ${type}`;
   authFeedback.style.display = 'block';
 }
 
@@ -166,18 +306,78 @@ authForm.addEventListener('submit', async (e) => {
 
   const username = authUsername.value.trim();
   const password = authPassword.value;
+  const recoveryCode = authRecovery.value.trim();
+
+  if (authMode === 'reset') {
+    try {
+      const res = await fetch('/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, recoveryCode, newPassword: password })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showFeedback(data.error || 'Reset failed', 'error');
+        return;
+      }
+      setAuthMode('login');
+      authPassword.value = '';
+      showFeedback(data.message || 'Password reset complete! Please sign in.', 'success');
+    } catch (err) {
+      showFeedback('Network error. Please try again.');
+    }
+    return;
+  }
+
+  if (authMode === 'delete') {
+    if (!username) {
+      showFeedback('Please enter your username.', 'error');
+      return;
+    }
+    if (!password && !recoveryCode) {
+      showFeedback('Enter either your password or Secret Recovery PIN (0119).', 'error');
+      return;
+    }
+    if (!confirm(`Are you sure you want to permanently delete account "${username}"?`)) {
+      return;
+    }
+    try {
+      const res = await fetch('/delete-account', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password, recoveryCode })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showFeedback(data.error || 'Failed to delete account.', 'error');
+        return;
+      }
+      localStorage.removeItem('ps_username');
+      setAuthMode('login');
+      authUsername.value = '';
+      authPassword.value = '';
+      authRecovery.value = '';
+      showFeedback(data.message || 'Account successfully deleted! You can now register.', 'success');
+    } catch (err) {
+      showFeedback('Network error. Please try again.');
+    }
+    return;
+  }
 
   const endpoint = authMode === 'login' ? '/login' : '/register';
   try {
     const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password })
+      body: JSON.stringify({ username, password, recoveryCode })
     });
     const data = await res.json();
     if (!res.ok) {
       showFeedback(data.error || 'Authentication failed');
       return;
+    }
+    if (userSettings.autoLogin) {
+      localStorage.setItem('ps_username', data.username);
     }
     enterApp(data.username);
   } catch (err) {
@@ -198,16 +398,104 @@ function enterApp(username) {
 
 logoutBtn.addEventListener('click', () => {
   if (socket) socket.disconnect();
+  localStorage.removeItem('ps_username');
   currentUser = null;
   activeFriend = null;
-  unreadCounts = {};
-  resetTitleAlert();
-  dismissNotificationBanner();
-  closeSettingsModal();
   messagesList.innerHTML = '';
   chatContainer.style.display = 'none';
   authContainer.style.display = 'flex';
   authPassword.value = '';
+});
+
+// ================= SETTINGS MODAL LOGIC =================
+
+function openSettings() {
+  cpFeedback.style.display = 'none';
+  settingsModal.style.display = 'flex';
+}
+
+function closeSettings() {
+  settingsModal.style.display = 'none';
+}
+
+openSettingsBtn.addEventListener('click', openSettings);
+headerSettingsBtn.addEventListener('click', openSettings);
+closeSettingsBtn.addEventListener('click', closeSettings);
+
+toggleSoundCheckbox.addEventListener('change', () => {
+  userSettings.soundEnabled = toggleSoundCheckbox.checked;
+  localStorage.setItem('ps_sound', userSettings.soundEnabled);
+  if (userSettings.soundEnabled) playMessageBeep();
+});
+
+toggleVibrateCheckbox.addEventListener('change', () => {
+  userSettings.vibrateEnabled = toggleVibrateCheckbox.checked;
+  localStorage.setItem('ps_vibrate', userSettings.vibrateEnabled);
+});
+
+toggleAutologinCheckbox.addEventListener('change', () => {
+  userSettings.autoLogin = toggleAutologinCheckbox.checked;
+  localStorage.setItem('ps_autologin', userSettings.autoLogin);
+  if (userSettings.autoLogin && currentUser) {
+    localStorage.setItem('ps_username', currentUser);
+  } else {
+    localStorage.removeItem('ps_username');
+  }
+});
+
+enablePushBtn.addEventListener('click', async () => {
+  if (!('Notification' in window)) {
+    alert('Browser notifications are not supported on this device.');
+    return;
+  }
+  const perm = await Notification.requestPermission();
+  if (perm === 'granted') {
+    enablePushBtn.textContent = '✓ Enabled';
+    new Notification('Private Space 💜', { body: 'Background alerts are now active!' });
+  } else {
+    alert('Please allow notification permission in your browser settings.');
+  }
+});
+
+clearChatBtn.addEventListener('click', () => {
+  if (!activeFriend) {
+    alert('Select a friend first.');
+    return;
+  }
+  if (confirm(`Delete all chat messages with ${activeFriend} for both of you?`)) {
+    socket.emit('clear-chat', { friend: activeFriend });
+    closeSettings();
+  }
+});
+
+changePassForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  cpFeedback.style.display = 'none';
+  try {
+    const res = await fetch('/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: currentUser,
+        oldPassword: cpOld.value,
+        newPassword: cpNew.value,
+        newRecoveryCode: cpPin.value.trim()
+      })
+    });
+    const data = await res.json();
+    cpFeedback.textContent = data.message || data.error;
+    cpFeedback.className = `auth-feedback ${res.ok ? 'success' : 'error'}`;
+    cpFeedback.style.display = 'block';
+    if (res.ok) {
+      cpOld.value = '';
+      cpNew.value = '';
+      cpPin.value = '';
+    }
+  } catch (err) {
+    cpFeedback.textContent = 'Error updating password.';
+    cpFeedback.className = 'auth-feedback error';
+    cpFeedback.style.display = 'block';
+  }
 });
 
 // ================= SIDEBAR & RESPONSIVE DRAWER =================
@@ -226,10 +514,10 @@ function closeMobileSidebar() {
   sidebarBackdrop.classList.remove('active');
 }
 
-toggleSidebarBtn.addEventListener('click', openMobileSidebar);
-emptyOpenMenuBtn.addEventListener('click', openMobileSidebar);
-closeSidebarBtn.addEventListener('click', closeMobileSidebar);
-sidebarBackdrop.addEventListener('click', closeMobileSidebar);
+if (toggleSidebarBtn) toggleSidebarBtn.addEventListener('click', openMobileSidebar);
+if (emptyOpenMenuBtn) emptyOpenMenuBtn.addEventListener('click', openMobileSidebar);
+if (closeSidebarBtn) closeSidebarBtn.addEventListener('click', closeMobileSidebar);
+if (sidebarBackdrop) sidebarBackdrop.addEventListener('click', closeMobileSidebar);
 
 sideTabs.forEach(btn => {
   btn.addEventListener('click', () => {
@@ -242,7 +530,7 @@ sideTabs.forEach(btn => {
   });
 });
 
-// ================= SOCKET.IO & SOCIAL LISTS =================
+// ================= SOCKET.IO & REAL-TIME CHAT =================
 
 function connectSocket() {
   socket = io({ query: { username: currentUser } });
@@ -251,7 +539,6 @@ function connectSocket() {
     socialState = data;
     renderSocialLists();
 
-    // Auto-select friend if only 1 friend exists and none selected yet
     if (!activeFriend && data.friends.length === 1) {
       selectFriend(data.friends[0].username);
     } else if (activeFriend) {
@@ -260,44 +547,66 @@ function connectSocket() {
   });
 
   socket.on('private-chat-history', ({ friend, messages }) => {
-    if (!activeFriend || (friend || '').toLowerCase() !== activeFriend.toLowerCase()) return;
+    if (friend !== activeFriend) return;
     messagesList.innerHTML = '';
-    (messages || []).forEach(msg => appendMessage(msg));
+    messages.forEach(msg => appendMessage(msg));
     scrollToBottom();
   });
 
   socket.on('private-message', (msg) => {
-    if (!currentUser || !msg) return;
-    const sender = (msg.username || '').toLowerCase();
-    const recipient = (msg.recipient || '').toLowerCase();
-    const me = currentUser.toLowerCase();
+    const isMine = msg.username === currentUser;
+    const isRelevant =
+      (isMine && msg.recipient === activeFriend) ||
+      (msg.username === activeFriend && msg.recipient === currentUser);
 
-    // 1. Private message received from a friend
-    if (recipient === me && sender !== me) {
-      if (soundNotificationsEnabled) {
-        playNotificationSound();
+    if (!isMine) {
+      playMessageBeep();
+      if (userSettings.vibrateEnabled && navigator.vibrate) {
+        navigator.vibrate(180);
       }
+      if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+        new Notification(`New message from ${msg.username}`, { body: msg.text });
+      }
+    }
 
-      const isChatOpenWithSender = activeFriend && activeFriend.toLowerCase() === sender;
-      if (isChatOpenWithSender) {
-        appendMessage(msg);
-        scrollToBottom();
-        if (document.hidden || !document.hasFocus()) {
-          triggerTitleAlert(msg.username);
-        }
-      } else {
-        // Message arrived while in another chat or sidebar
-        unreadCounts[sender] = (unreadCounts[sender] || 0) + 1;
-        renderSocialLists();
-        showNotificationBanner(msg.username, msg.text);
-        triggerTitleAlert(msg.username);
+    if (isRelevant) {
+      appendMessage(msg);
+      scrollToBottom();
+      if (!isMine && !document.hidden) {
+        socket.emit('mark-seen', { friend: activeFriend });
       }
-    } else if (sender === me) {
-      // 2. Sent message confirmed by server
-      if (activeFriend && recipient === activeFriend.toLowerCase()) {
-        appendMessage(msg);
-        scrollToBottom();
-      }
+    }
+  });
+
+  socket.on('messages-seen', ({ by }) => {
+    if (by !== activeFriend) return;
+    document.querySelectorAll('.seen-status').forEach(el => {
+      el.textContent = '✓✓ Seen';
+      el.classList.add('is-seen');
+    });
+  });
+
+  socket.on('typing', ({ from }) => {
+    if (from === activeFriend) {
+      headerSubtitle.textContent = '✍️ typing...';
+      headerSubtitle.classList.add('typing-glow');
+    }
+  });
+
+  socket.on('stop-typing', ({ from }) => {
+    if (from === activeFriend) {
+      headerSubtitle.classList.remove('typing-glow');
+      updateActiveFriendHeader();
+    }
+  });
+
+  socket.on('message-reacted', ({ id, reaction }) => {
+    const row = document.querySelector(`.msg-row[data-id="${id}"]`);
+    if (!row) return;
+    const pill = row.querySelector('.reaction-pill');
+    if (pill) {
+      pill.style.display = reaction ? 'inline-block' : 'none';
+      pill.textContent = reaction || '';
     }
   });
 
@@ -306,10 +615,27 @@ function connectSocket() {
     if (el) el.remove();
   });
 
+  socket.on('chat-cleared', ({ friend }) => {
+    if (friend === activeFriend) {
+      messagesList.innerHTML = '';
+    }
+  });
+
   // WebRTC Signaling Listeners
   socket.on('incoming-call', handleIncomingCall);
   socket.on('call-answered', handleCallAnswered);
   socket.on('ice-candidate', handleNewIceCandidate);
+  socket.on('call-media-state', ({ micEnabled, camEnabled }) => {
+    const states = [];
+    if (micEnabled === false) states.push('🔇 Mic Muted');
+    if (camEnabled === false) states.push('📷 Camera Off');
+    if (states.length > 0) {
+      remoteStatusPill.textContent = states.join(' • ');
+      remoteStatusPill.style.display = 'block';
+    } else {
+      remoteStatusPill.style.display = 'none';
+    }
+  });
   socket.on('call-rejected', () => {
     cleanupCallUI();
     alert('Call was declined.');
@@ -326,15 +652,7 @@ function connectSocket() {
 function renderSocialLists() {
   const { friends, requests, discover } = socialState;
 
-  const totalUnreads = Object.values(unreadCounts).reduce((a, b) => a + b, 0);
-  if (totalUnreads > 0) {
-    badgeFriends.textContent = `${friends.length} (${totalUnreads})`;
-    badgeFriends.classList.add('alert');
-  } else {
-    badgeFriends.textContent = friends.length;
-    badgeFriends.classList.remove('alert');
-  }
-
+  badgeFriends.textContent = friends.length;
   if (requests.length > 0) {
     badgeRequests.style.display = 'inline-block';
     badgeRequests.textContent = requests.length;
@@ -352,15 +670,11 @@ function renderSocialLists() {
     friends.forEach(f => {
       const card = document.createElement('div');
       card.className = `user-card ${activeFriend === f.username ? 'active-chat' : ''}`;
-      const unreads = unreadCounts[f.username.toLowerCase()] || 0;
       card.innerHTML = `
         <div class="user-card-left">
           <div class="avatar-circle small">${f.username.charAt(0).toUpperCase()}</div>
           <div>
-            <div class="user-card-name">
-              ${escapeHTML(f.username)}
-              ${unreads > 0 ? `<span class="user-unread-badge">${unreads}</span>` : ''}
-            </div>
+            <div class="user-card-name">${escapeHTML(f.username)}</div>
             <div class="user-card-sub">
               <span class="${f.online ? 'dot-online' : 'dot-offline'}"></span>
               ${f.online ? 'Online' : 'Offline'}
@@ -455,187 +769,14 @@ function renderSocialLists() {
   }
 }
 
-// ================= NOTIFICATION SOUND & VISUAL ALERTS =================
-
-function playNotificationSound() {
-  // CRITICAL: Sound ONLY plays when Notification toggle is explicitly turned ON
-  if (!soundNotificationsEnabled) return;
-
-  try {
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContextClass) return;
-
-    if (!audioCtx) {
-      audioCtx = new AudioContextClass();
-    }
-    if (audioCtx.state === 'suspended') {
-      audioCtx.resume();
-    }
-
-    const now = audioCtx.currentTime;
-
-    // Pleasant two-tone chime (E5: 659.25Hz -> A5: 880.00Hz)
-    const osc1 = audioCtx.createOscillator();
-    const gain1 = audioCtx.createGain();
-    osc1.type = 'sine';
-    osc1.frequency.setValueAtTime(659.25, now);
-    gain1.gain.setValueAtTime(0.12, now);
-    gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
-    osc1.connect(gain1);
-    gain1.connect(audioCtx.destination);
-    osc1.start(now);
-    osc1.stop(now + 0.12);
-
-    const osc2 = audioCtx.createOscillator();
-    const gain2 = audioCtx.createGain();
-    osc2.type = 'sine';
-    osc2.frequency.setValueAtTime(880.00, now + 0.08);
-    gain2.gain.setValueAtTime(0.15, now + 0.08);
-    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
-    osc2.connect(gain2);
-    gain2.connect(audioCtx.destination);
-    osc2.start(now + 0.08);
-    osc2.stop(now + 0.28);
-  } catch (err) {
-    console.warn('[NotificationSound] AudioContext error:', err);
-  }
-}
-
-function unlockAudioContext() {
-  if (audioCtx && audioCtx.state === 'suspended') {
-    audioCtx.resume();
-  }
-}
-window.addEventListener('click', unlockAudioContext, { passive: true });
-window.addEventListener('keydown', unlockAudioContext, { passive: true });
-window.addEventListener('touchstart', unlockAudioContext, { passive: true });
-
-function triggerTitleAlert(senderName) {
-  if (!document.hidden && document.hasFocus()) return;
-  if (titleBlinkInterval) clearInterval(titleBlinkInterval);
-
-  let toggle = false;
-  titleBlinkInterval = setInterval(() => {
-    document.title = toggle
-      ? `💬 New message from ${senderName}!`
-      : `(1) Private Space 💜`;
-    toggle = !toggle;
-  }, 1000);
-}
-
-function resetTitleAlert() {
-  if (titleBlinkInterval) {
-    clearInterval(titleBlinkInterval);
-    titleBlinkInterval = null;
-  }
-  document.title = originalDocumentTitle;
-}
-
-window.addEventListener('focus', resetTitleAlert);
-document.addEventListener('visibilitychange', () => {
-  if (!document.hidden && document.hasFocus()) {
-    resetTitleAlert();
-  }
-});
-
-function showNotificationBanner(sender, text) {
-  if (!notifBanner) return;
-
-  if (notifAvatar) notifAvatar.textContent = (sender || '?').charAt(0).toUpperCase();
-  if (notifSender) notifSender.textContent = sender;
-  if (notifText) notifText.textContent = text;
-
-  notifBanner.classList.remove('dismissing');
-  notifBanner.style.display = 'flex';
-
-  if (notifBannerTimeout) clearTimeout(notifBannerTimeout);
-  notifBannerTimeout = setTimeout(dismissNotificationBanner, 4500);
-}
-
-function dismissNotificationBanner() {
-  if (!notifBanner) return;
-  notifBanner.classList.add('dismissing');
-  setTimeout(() => {
-    if (notifBanner && notifBanner.classList.contains('dismissing')) {
-      notifBanner.style.display = 'none';
-      notifBanner.classList.remove('dismissing');
-    }
-  }, 260);
-}
-
-if (notifCloseBtn) {
-  notifCloseBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    dismissNotificationBanner();
-  });
-}
-
-if (notifBanner) {
-  notifBanner.addEventListener('click', () => {
-    const sender = notifSender ? notifSender.textContent : null;
-    dismissNotificationBanner();
-    if (sender) {
-      selectFriend(sender);
-      closeMobileSidebar();
-    }
-  });
-}
-
-// ================= SETTINGS MODAL & SOUND PREFERENCE =================
-
-function openSettingsModal() {
-  if (settingsModal) {
-    if (toggleSoundNotifications) {
-      toggleSoundNotifications.checked = soundNotificationsEnabled;
-    }
-    settingsModal.style.display = 'flex';
-  }
-}
-
-function closeSettingsModal() {
-  if (settingsModal) {
-    settingsModal.style.display = 'none';
-  }
-}
-
-if (toggleSoundNotifications) {
-  // Ensure DOM toggle is initialized (OFF by default)
-  toggleSoundNotifications.checked = soundNotificationsEnabled;
-  toggleSoundNotifications.addEventListener('change', (e) => {
-    soundNotificationsEnabled = e.target.checked;
-    localStorage.setItem('sound_notifications_enabled', String(soundNotificationsEnabled));
-  });
-}
-
-if (settingsBtn) settingsBtn.addEventListener('click', openSettingsModal);
-if (headerSettingsBtn) headerSettingsBtn.addEventListener('click', openSettingsModal);
-if (closeSettingsBtn) closeSettingsBtn.addEventListener('click', closeSettingsModal);
-if (saveSettingsBtn) saveSettingsBtn.addEventListener('click', closeSettingsModal);
-
-if (settingsModal) {
-  settingsModal.addEventListener('click', (e) => {
-    if (e.target === settingsModal) {
-      closeSettingsModal();
-    }
-  });
-}
-
 // ================= PRIVATE 1-ON-1 CHAT =================
 
 function selectFriend(friendName) {
   activeFriend = friendName;
-  if (friendName) {
-    delete unreadCounts[friendName.toLowerCase()];
-  }
-  resetTitleAlert();
-
   emptyChatState.style.display = 'none';
   messageInput.disabled = false;
   sendBtn.disabled = false;
   messageInput.placeholder = `Message ${friendName}...`;
-
-  // Immediately clear chat to maintain absolute privacy between friends
-  messagesList.innerHTML = '';
 
   updateActiveFriendHeader();
   renderSocialLists();
@@ -644,14 +785,23 @@ function selectFriend(friendName) {
 
 function updateActiveFriendHeader() {
   if (!activeFriend) return;
-  const friendObj = socialState.friends.find(f => (f.username || '').toLowerCase() === activeFriend.toLowerCase());
+  const friendObj = socialState.friends.find(f => f.username === activeFriend);
   const isOnline = friendObj ? friendObj.online : false;
 
   headerAvatar.textContent = activeFriend.charAt(0).toUpperCase();
   headerTitle.textContent = activeFriend;
-  headerSubtitle.textContent = isOnline ? '🟢 Online right now' : '⚪ Currently offline';
+  headerSubtitle.textContent = isOnline ? '🟢 Online right now' : '⚪ Offline (Messages will be saved)';
   headerCallActions.style.display = 'flex';
 }
+
+messageInput.addEventListener('input', () => {
+  if (!activeFriend || !socket) return;
+  socket.emit('typing', { to: activeFriend });
+  clearTimeout(typingTimeout);
+  typingTimeout = setTimeout(() => {
+    socket.emit('stop-typing', { to: activeFriend });
+  }, 1200);
+});
 
 headerVoiceBtn.addEventListener('click', () => {
   if (activeFriend) startCall(activeFriend, false);
@@ -668,31 +818,49 @@ chatForm.addEventListener('submit', (e) => {
   if (!text) return;
 
   socket.emit('private-message', { to: activeFriend, text });
+  socket.emit('stop-typing', { to: activeFriend });
   messageInput.value = '';
 });
 
 function appendMessage(msg) {
-  if (!msg || !msg.text) return;
-  if (msg.id && document.querySelector(`.msg-row[data-id="${msg.id}"]`)) return;
+  if (document.querySelector(`.msg-row[data-id="${msg.id}"]`)) return;
 
-  const isMine = (msg.username || '').toLowerCase() === (currentUser || '').toLowerCase();
+  const isMine = msg.username === currentUser;
   const li = document.createElement('li');
   li.className = `msg-row ${isMine ? 'mine' : 'theirs'}`;
-  if (msg.id) li.dataset.id = msg.id;
+  li.dataset.id = msg.id;
 
   const time = msg.created_at
     ? new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     : '';
 
+  const seenHTML = isMine
+    ? `<span class="seen-status ${msg.seen ? 'is-seen' : ''}">${msg.seen ? '✓✓ Seen' : '✓ Sent'}</span>`
+    : '';
+
   li.innerHTML = `
-    <div class="msg-bubble">${escapeHTML(msg.text)}</div>
+    <div class="msg-bubble-wrap">
+      <div class="msg-bubble" title="Double-tap to react ❤️">
+        ${escapeHTML(msg.text)}
+        <span class="reaction-pill" style="display: ${msg.reaction ? 'inline-block' : 'none'};">${msg.reaction || ''}</span>
+      </div>
+    </div>
     <div class="msg-meta">
       <span>${isMine ? 'You' : escapeHTML(msg.username)} • ${time}</span>
-      ${isMine ? `<button type="button" class="delete-msg-btn" title="Delete">🗑️</button>` : ''}
+      ${seenHTML}
+      <button type="button" class="msg-action-btn react-btn" title="Heart Reaction">♡</button>
+      ${isMine ? `<button type="button" class="msg-action-btn delete-msg-btn" title="Delete">🗑️</button>` : ''}
     </div>
   `;
 
-  if (isMine && msg.id) {
+  const triggerReaction = () => {
+    socket.emit('react-message', { id: msg.id, friend: activeFriend });
+  };
+
+  li.querySelector('.msg-bubble').addEventListener('dblclick', triggerReaction);
+  li.querySelector('.react-btn').addEventListener('click', triggerReaction);
+
+  if (isMine) {
     li.querySelector('.delete-msg-btn').addEventListener('click', () => {
       socket.emit('delete-message', { id: msg.id, friend: activeFriend });
     });
@@ -705,22 +873,29 @@ function scrollToBottom() {
   messagesContainer.scrollTop = messagesContainer.scrollHeight;
 }
 
-// ================= WEBRTC AUDIO & VIDEO CALLING =================
+// ================= REAL-WORLD WEBRTC AUDIO & VIDEO CALLING =================
+
+// Tap Local PiP Video to Swap Fullscreen
+localVideoWrap.addEventListener('click', () => {
+  videoStage.classList.toggle('swapped-pip');
+});
 
 async function startCall(targetUser, videoEnabled) {
-  const friendObj = socialState.friends.find(f => (f.username || '').toLowerCase() === targetUser.toLowerCase());
+  const friendObj = socialState.friends.find(f => f.username === targetUser);
   if (!friendObj || !friendObj.online) {
-    alert(`${targetUser} is currently offline.`);
+    alert(`${targetUser} is currently offline. You can still send them messages!`);
     return;
   }
 
   currentCallPartner = targetUser;
   isCurrentCallVideo = videoEnabled;
+  currentFacingMode = 'user';
+  isSpeakerphone = videoEnabled; // Video calls default to speaker, Voice calls default to earpiece
 
   try {
     localStream = await navigator.mediaDevices.getUserMedia({
-      audio: true,
-      video: videoEnabled
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      video: videoEnabled ? { facingMode: currentFacingMode } : false
     });
   } catch (err) {
     alert('Please allow microphone/camera permissions to make a call.');
@@ -730,6 +905,7 @@ async function startCall(targetUser, videoEnabled) {
   outgoingCalleeAvatar.textContent = targetUser.charAt(0).toUpperCase();
   outgoingCalleeName.textContent = `Calling ${targetUser}...`;
   outgoingOverlay.style.display = 'flex';
+  startCallTone('outgoing');
 
   createPeerConnection(targetUser);
   localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
@@ -742,6 +918,19 @@ async function startCall(targetUser, videoEnabled) {
     offer,
     isVideo: videoEnabled
   });
+
+  // 30-Second Auto-Timeout + Missed Call Log
+  clearTimeout(callRingTimeout);
+  callRingTimeout = setTimeout(() => {
+    if (outgoingOverlay.style.display !== 'none') {
+      socket.emit('end-call', { to: targetUser });
+      socket.emit('private-message', {
+        to: targetUser,
+        text: videoEnabled ? '📞 Missed Video Call' : '📞 Missed Voice Call'
+      });
+      cleanupCallUI();
+    }
+  }, 30000);
 }
 
 function handleIncomingCall({ from, offer, isVideo }) {
@@ -749,19 +938,23 @@ function handleIncomingCall({ from, offer, isVideo }) {
   currentCallPartner = from;
   incomingOfferData = offer;
   isCurrentCallVideo = Boolean(isVideo);
+  currentFacingMode = 'user';
+  isSpeakerphone = Boolean(isVideo);
 
   incomingCallerAvatar.textContent = from.charAt(0).toUpperCase();
   incomingCallerName.textContent = `${from} is calling...`;
   incomingCallType.textContent = isCurrentCallVideo ? '📹 Incoming Video Call' : '📞 Incoming Voice Call';
   incomingOverlay.style.display = 'flex';
+  startCallTone('incoming');
 }
 
 acceptCallBtn.addEventListener('click', async () => {
+  stopCallTone();
   incomingOverlay.style.display = 'none';
   try {
     localStream = await navigator.mediaDevices.getUserMedia({
-      audio: true,
-      video: isCurrentCallVideo
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      video: isCurrentCallVideo ? { facingMode: currentFacingMode } : false
     });
   } catch (err) {
     alert('Microphone/Camera permission denied.');
@@ -788,6 +981,7 @@ acceptCallBtn.addEventListener('click', async () => {
 });
 
 declineCallBtn.addEventListener('click', () => {
+  stopCallTone();
   if (currentCallPartner) {
     socket.emit('reject-call', { to: currentCallPartner });
   }
@@ -795,13 +989,20 @@ declineCallBtn.addEventListener('click', () => {
 });
 
 cancelCallBtn.addEventListener('click', () => {
+  stopCallTone();
   if (currentCallPartner) {
     socket.emit('end-call', { to: currentCallPartner });
+    socket.emit('private-message', {
+      to: currentCallPartner,
+      text: isCurrentCallVideo ? '📞 Missed Video Call' : '📞 Missed Voice Call'
+    });
   }
   cleanupCallUI();
 });
 
 async function handleCallAnswered({ answer }) {
+  stopCallTone();
+  clearTimeout(callRingTimeout);
   outgoingOverlay.style.display = 'none';
   if (!peerConnection) return;
   await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
@@ -848,21 +1049,23 @@ function createPeerConnection(partnerUsername) {
 function showActiveCallScreen() {
   callModal.style.display = 'block';
   localVideo.srcObject = localStream;
+  localVideo.classList.toggle('back-cam', currentFacingMode === 'environment');
 
   if (isCurrentCallVideo) {
     localVideoWrap.style.display = 'block';
     audioPlaceholder.style.display = 'none';
-    toggleCamBtn.style.display = 'inline-block';
+    toggleCamBtn.style.display = 'flex';
+    flipCamBtn.style.display = 'flex';
   } else {
     localVideoWrap.style.display = 'none';
     audioPlaceholder.style.display = 'flex';
     activeCallAvatar.textContent = currentCallPartner.charAt(0).toUpperCase();
     activeCallUsername.textContent = currentCallPartner;
     toggleCamBtn.style.display = 'none';
+    flipCamBtn.style.display = 'none';
   }
 
-  // Default to speakerphone on call start and initialize routing
-  applyAudioRouting('speaker');
+  applyAudioOutputMode();
 
   callSeconds = 0;
   callTimerEl.textContent = '00:00';
@@ -875,12 +1078,79 @@ function showActiveCallScreen() {
   }, 1000);
 }
 
+// Switch Earpiece vs Speakerphone
+async function applyAudioOutputMode() {
+  toggleSpeakerBtn.textContent = isSpeakerphone ? '🔊' : '👂';
+  toggleSpeakerBtn.classList.toggle('active-speaker', isSpeakerphone);
+  audioModeLabel.textContent = isSpeakerphone
+    ? '🔊 Speakerphone Mode Active'
+    : '👂 Normal Call (Earpiece Mode)';
+
+  // Dim screen slightly in Earpiece voice mode like a real phone call
+  videoStage.classList.toggle('earpiece-dim', !isSpeakerphone && !isCurrentCallVideo);
+
+  // Adjust gain/volume for earpiece comfort vs loudspeaker
+  remoteVideo.volume = isSpeakerphone ? 1.0 : 0.65;
+
+  // Attempt hardware sink routing if supported by mobile/desktop browser
+  if (typeof remoteVideo.setSinkId === 'function' && navigator.mediaDevices?.enumerateDevices) {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const audioOutputs = devices.filter(d => d.kind === 'audiooutput');
+      if (audioOutputs.length > 1) {
+        const target = audioOutputs.find(d =>
+          isSpeakerphone
+            ? /speaker/i.test(d.label)
+            : /earpiece|receiver|communications|default/i.test(d.label)
+        );
+        if (target) await remoteVideo.setSinkId(target.deviceId);
+      }
+    } catch (e) {}
+  }
+}
+
+toggleSpeakerBtn.addEventListener('click', () => {
+  isSpeakerphone = !isSpeakerphone;
+  applyAudioOutputMode();
+});
+
+// Flip Front / Back Camera during live video call
+flipCamBtn.addEventListener('click', async () => {
+  if (!localStream || !isCurrentCallVideo) return;
+  currentFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
+
+  try {
+    const newVideoStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: currentFacingMode },
+      audio: false
+    });
+    const newVideoTrack = newVideoStream.getVideoTracks()[0];
+    const oldVideoTrack = localStream.getVideoTracks()[0];
+
+    if (oldVideoTrack) {
+      localStream.removeTrack(oldVideoTrack);
+      oldVideoTrack.stop();
+    }
+    localStream.addTrack(newVideoTrack);
+    localVideo.srcObject = localStream;
+    localVideo.classList.toggle('back-cam', currentFacingMode === 'environment');
+
+    if (peerConnection) {
+      const sender = peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
+      if (sender) await sender.replaceTrack(newVideoTrack);
+    }
+  } catch (err) {
+    alert('Unable to switch camera on this device.');
+  }
+});
+
 toggleMicBtn.addEventListener('click', () => {
   if (!localStream) return;
   const audioTrack = localStream.getAudioTracks()[0];
   if (audioTrack) {
     audioTrack.enabled = !audioTrack.enabled;
     toggleMicBtn.classList.toggle('muted', !audioTrack.enabled);
+    emitMediaState();
   }
 });
 
@@ -890,111 +1160,18 @@ toggleCamBtn.addEventListener('click', () => {
   if (videoTrack) {
     videoTrack.enabled = !videoTrack.enabled;
     toggleCamBtn.classList.toggle('muted', !videoTrack.enabled);
+    emitMediaState();
   }
 });
 
-// Audio Output Routing Controls (Speaker vs Earpiece)
-if (toggleAudioRouteBtn) {
-  toggleAudioRouteBtn.addEventListener('click', () => {
-    const nextMode = currentAudioRoute === 'speaker' ? 'earpiece' : 'speaker';
-    applyAudioRouting(nextMode);
-  });
-}
-
-function showCallToast(icon, text) {
-  if (!callToast) return;
-  if (callToastIcon) callToastIcon.textContent = icon;
-  if (callToastText) callToastText.textContent = text;
-
-  callToast.classList.remove('fade-out');
-  callToast.style.display = 'flex';
-
-  if (callToastTimeout) clearTimeout(callToastTimeout);
-  callToastTimeout = setTimeout(() => {
-    callToast.classList.add('fade-out');
-    setTimeout(() => {
-      if (callToast && callToast.classList.contains('fade-out')) {
-        callToast.style.display = 'none';
-      }
-    }, 300);
-  }, 1800);
-}
-
-async function applyAudioRouting(mode) {
-  currentAudioRoute = mode;
-  const isSpeaker = mode === 'speaker';
-
-  // 1. Update toggle button appearance
-  if (toggleAudioRouteBtn) {
-    toggleAudioRouteBtn.textContent = isSpeaker ? '🔊' : '📞';
-    toggleAudioRouteBtn.title = isSpeaker
-      ? 'Current: Speakerphone (Click for Earpiece)'
-      : 'Current: Earpiece / Normal Call (Click for Speakerphone)';
-    toggleAudioRouteBtn.classList.toggle('earpiece-mode', !isSpeaker);
-  }
-
-  // 2. Display visual toast inside call modal
-  showCallToast(
-    isSpeaker ? '🔊' : '📞',
-    isSpeaker ? 'Speakerphone Mode' : 'Earpiece / Normal Call'
-  );
-
-  // 3. Device output routing via setSinkId if supported
-  if (remoteVideo && typeof remoteVideo.setSinkId === 'function') {
-    try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const audioOutputs = devices.filter(d => d.kind === 'audiooutput');
-
-      if (audioOutputs.length > 0) {
-        let targetSinkId = '';
-        if (isSpeaker) {
-          const speakerDev = audioOutputs.find(d =>
-            /speaker|loudspeaker|external/i.test(d.label)
-          );
-          targetSinkId = speakerDev ? speakerDev.deviceId : 'default';
-        } else {
-          const earpieceDev = audioOutputs.find(d =>
-            /earpiece|receiver|handset|phone|internal|telephony/i.test(d.label)
-          );
-          if (earpieceDev) {
-            targetSinkId = earpieceDev.deviceId;
-          } else {
-            const nonSpeaker = audioOutputs.find(d =>
-              !/speaker|loudspeaker/i.test(d.label) && d.deviceId && d.deviceId !== 'default'
-            );
-            targetSinkId = nonSpeaker ? nonSpeaker.deviceId : 'default';
-          }
-        }
-
-        if (targetSinkId !== undefined) {
-          await remoteVideo.setSinkId(targetSinkId);
-          console.log(`[AudioRoute] Output routed via setSinkId to: ${targetSinkId} (${mode})`);
-        }
-      }
-    } catch (sinkErr) {
-      console.warn('[AudioRoute] setSinkId error:', sinkErr);
-    }
-  }
-
-  // 4. Acoustic volume adjustment (Earpiece mode is comfortably attenuated for ear proximity)
-  if (remoteVideo) {
-    remoteVideo.volume = isSpeaker ? 1.0 : 0.55;
-  }
-
-  // 5. AudioSession API integration if supported
-  if (navigator.audioSession) {
-    try {
-      navigator.audioSession.type = isSpeaker ? 'playback' : 'play-and-record';
-    } catch (e) {}
-  }
-}
-
-// React dynamically when headphones/audio devices are plugged/unplugged
-if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
-  navigator.mediaDevices.addEventListener('devicechange', () => {
-    if (callModal && callModal.style.display !== 'none') {
-      applyAudioRouting(currentAudioRoute);
-    }
+function emitMediaState() {
+  if (!currentCallPartner || !localStream) return;
+  const audioTrack = localStream.getAudioTracks()[0];
+  const videoTrack = localStream.getVideoTracks()[0];
+  socket.emit('call-media-state', {
+    to: currentCallPartner,
+    micEnabled: audioTrack ? audioTrack.enabled : true,
+    camEnabled: videoTrack ? videoTrack.enabled : false
   });
 }
 
@@ -1006,9 +1183,15 @@ endCallBtn.addEventListener('click', () => {
 });
 
 function cleanupCallUI() {
+  stopCallTone();
+  clearTimeout(callRingTimeout);
   incomingOverlay.style.display = 'none';
   outgoingOverlay.style.display = 'none';
   callModal.style.display = 'none';
+  remoteStatusPill.style.display = 'none';
+  videoStage.classList.remove('swapped-pip', 'earpiece-dim');
+  toggleMicBtn.classList.remove('muted');
+  toggleCamBtn.classList.remove('muted');
 
   clearInterval(callTimerInterval);
 
@@ -1026,17 +1209,6 @@ function cleanupCallUI() {
   currentCallPartner = null;
   incomingOfferData = null;
   iceCandidateQueue = [];
-
-  // Reset Audio Routing State
-  currentAudioRoute = 'speaker';
-  if (toggleAudioRouteBtn) {
-    toggleAudioRouteBtn.textContent = '🔊';
-    toggleAudioRouteBtn.title = 'Audio Output: Speakerphone (Click to switch to Earpiece)';
-    toggleAudioRouteBtn.classList.remove('earpiece-mode');
-  }
-  if (callToast) {
-    callToast.style.display = 'none';
-  }
 }
 
 function escapeHTML(str) {

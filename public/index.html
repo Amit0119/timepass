@@ -3,34 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Private Space 💜</title>
+  <title>MINI-WORLD</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-
-  <!-- ================= IN-APP NOTIFICATION BANNER ================= -->
-  <div id="msg-notification-banner" class="msg-notification-banner" style="display: none;">
-    <div class="notif-avatar" id="notif-avatar">💜</div>
-    <div class="notif-content">
-      <div class="notif-header">
-        <span class="notif-sender" id="notif-sender">Friend</span>
-        <span class="notif-time">Just now</span>
-      </div>
-      <div class="notif-text" id="notif-text">New message</div>
-    </div>
-    <button type="button" class="notif-close-btn" id="notif-close-btn" title="Dismiss">✕</button>
-  </div>
 
   <!-- ================= AUTHENTICATION SCREEN ================= -->
   <div id="auth-container" class="auth-wrapper">
     <div class="auth-card">
       <div class="auth-brand">
         <div class="brand-logo">💜</div>
-        <h1>Private Space</h1>
-        <p>Exclusive 2-Person Chat & Audio/Video Calling</p>
+        <h1>MINI-WORLD</h1>
       </div>
 
-      <div class="auth-tabs">
+      <div id="auth-tabs-box" class="auth-tabs">
         <button type="button" id="tab-login" class="auth-tab active">Sign In</button>
         <button type="button" id="tab-register" class="auth-tab">Register</button>
       </div>
@@ -46,18 +32,24 @@
           </div>
         </div>
 
+        <div id="recovery-group" class="input-group" style="display: none;">
+          <label id="recovery-label" for="auth-recovery">Secret Recovery PIN (For Forgot Password)</label>
+          <div class="input-box">
+            <span class="input-icon">🔑</span>
+            <input type="text" id="auth-recovery" placeholder="Enter Your Secret PIN" maxlength="20" />
+          </div>
+        </div>
+
         <div class="input-group">
-          <label for="auth-password">Password</label>
+          <label id="password-label" for="auth-password">Password</label>
           <div class="input-box">
             <span class="input-icon">🔒</span>
             <input type="password" id="auth-password" placeholder="Minimum 6 characters" required minlength="6" />
             <button type="button" id="toggle-password" class="eye-btn" aria-label="Toggle password visibility">
-              <!-- Eye Open SVG -->
               <svg id="eye-open" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
                 <circle cx="12" cy="12" r="3"></circle>
               </svg>
-              <!-- Eye Closed SVG -->
               <svg id="eye-closed" style="display:none;" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
                 <line x1="1" y1="1" x2="23" y2="23"></line>
@@ -67,6 +59,12 @@
         </div>
 
         <button type="submit" id="auth-submit-btn" class="primary-btn">Sign In</button>
+
+        <div class="auth-footer-links">
+          <button type="button" id="forgot-password-btn" class="link-btn">Forgot Password?</button>
+          <button type="button" id="delete-account-link-btn" class="link-btn danger-link">Delete Account?</button>
+          <button type="button" id="back-to-login-btn" class="link-btn" style="display: none;">← Back to Sign In</button>
+        </div>
       </form>
     </div>
   </div>
@@ -88,7 +86,7 @@
           </div>
         </div>
         <div class="sidebar-header-actions">
-          <button type="button" id="settings-btn" class="icon-btn" title="Settings">⚙️</button>
+          <button type="button" id="open-settings-btn" class="icon-btn" title="Settings">⚙️</button>
           <button type="button" id="logout-btn" class="icon-btn danger-btn" title="Logout">
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
@@ -129,7 +127,6 @@
 
     <!-- Main Chat View -->
     <main class="chat-main">
-      <!-- Responsive Single-Line Top Header -->
       <header class="chat-header">
         <div class="header-left">
           <button type="button" id="toggle-sidebar-btn" class="menu-toggle-btn" title="Toggle Friends Menu">
@@ -150,12 +147,12 @@
           </div>
         </div>
 
-        <div class="header-right-actions">
-          <div id="header-call-actions" class="header-right" style="display: none;">
+        <div class="header-right">
+          <div id="header-call-actions" class="call-btn-group" style="display: none;">
             <button type="button" id="header-voice-btn" class="call-action-btn voice" title="Voice Call">📞</button>
             <button type="button" id="header-video-btn" class="call-action-btn video" title="Video Call">📹</button>
           </div>
-          <button type="button" id="header-settings-btn" class="icon-btn" title="Settings">⚙️</button>
+          <button type="button" id="header-settings-btn" class="call-action-btn" title="Settings">⚙️</button>
         </div>
       </header>
 
@@ -166,15 +163,12 @@
 
       <!-- Messages Scroll Container -->
       <div id="messages-container" class="messages-container">
-        <!-- Empty State before selecting a friend -->
         <div id="empty-chat-state" class="empty-chat-state">
           <div class="empty-icon">💌</div>
           <h3>Welcome meri pyari moti</h3>
-          <p>Apne friend ko add/select karo private 1-on-1 chat aur video call ke liye.</p>
-          <button type="button" id="empty-open-menu-btn" class="secondary-btn">👥 Open Friends Menu</button>
+          <button type="button" id="empty-open-menu-btn" class="primary-btn" style="margin-top:16px;padding:10px 20px;font-size:0.9rem;">👥 Find &amp; Add Partner</button>
         </div>
 
-        <!-- Messages List -->
         <ul id="messages" class="messages-list"></ul>
       </div>
 
@@ -195,6 +189,86 @@
         </button>
       </form>
     </main>
+  </div>
+
+  <!-- ================= SETTINGS MODAL ================= -->
+  <div id="settings-modal" class="modal-overlay" style="display: none;">
+    <div class="settings-card">
+      <div class="settings-header">
+        <h3>⚙️ App Settings</h3>
+        <button type="button" id="close-settings-btn" class="icon-btn">✕</button>
+      </div>
+
+      <div class="settings-body">
+        <div class="settings-section">
+          <h4>🔔 Notifications & Alerts</h4>
+          <div class="setting-row">
+            <div>
+              <div class="setting-title">Message Notification Sound</div>
+              <div class="setting-desc">Play sound on new message (Default: OFF)</div>
+            </div>
+            <input type="checkbox" id="toggle-sound" class="toggle-switch" />
+          </div>
+
+          <div class="setting-row">
+            <div>
+              <div class="setting-title">Vibration Alert</div>
+              <div class="setting-desc">Vibrate phone on messages & calls</div>
+            </div>
+            <input type="checkbox" id="toggle-vibrate" class="toggle-switch" checked />
+          </div>
+
+          <div class="setting-row">
+            <div>
+              <div class="setting-title">Background Browser Popups</div>
+              <div class="setting-desc">Show alert when browser tab is minimized</div>
+            </div>
+            <button type="button" id="enable-push-btn" class="mini-btn primary">Enable</button>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h4>🔐 Privacy & Chat</h4>
+          <div class="setting-row">
+            <div>
+              <div class="setting-title">Auto-Login (Remember Me)</div>
+              <div class="setting-desc">Stay signed in when refreshing page</div>
+            </div>
+            <input type="checkbox" id="toggle-autologin" class="toggle-switch" checked />
+          </div>
+
+          <div class="setting-row">
+            <div>
+              <div class="setting-title">Clear 1-on-1 Chat History</div>
+              <div class="setting-desc">Delete all messages for both of you</div>
+            </div>
+            <button type="button" id="clear-chat-btn" class="mini-btn decline">🗑️ Clear All</button>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h4>🔑 Change Password & Recovery PIN</h4>
+          <div id="cp-feedback" class="auth-feedback" style="display: none;"></div>
+          <form id="change-pass-form" class="cp-form">
+            <input type="password" id="cp-old" placeholder="Current Password" required />
+            <input type="password" id="cp-new" placeholder="New Password (min 6 chars)" required minlength="6" />
+            <input type="text" id="cp-pin" placeholder="Secret Recovery PIN (optional, e.g. 0119)" maxlength="20" />
+            <button type="submit" class="primary-btn small-btn">Update Password</button>
+          </form>
+        </div>
+
+        <div class="settings-section danger-section">
+          <h4 style="color: #ff5c75;">⚠️ Danger Zone</h4>
+          <div class="setting-row">
+            <div>
+              <div class="setting-title" style="color: #ff5c75;">Delete My Account</div>
+              <div class="setting-desc">Permanently erase your account, chats, and free up registration slot</div>
+            </div>
+            <button type="button" id="delete-my-account-btn" class="mini-btn decline">🗑️ Delete Account</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- ================= INCOMING CALL OVERLAY ================= -->
@@ -219,7 +293,7 @@
         <span id="outgoing-callee-avatar">U</span>
       </div>
       <h3 id="outgoing-callee-name">Calling...</h3>
-      <p>Ringing on their device...</p>
+      <p>Ringing on their device (Auto-timeout 30s)...</p>
       <div class="call-dialog-actions">
         <button type="button" id="cancel-call-btn" class="call-round-btn decline" title="Cancel Call">✕</button>
       </div>
@@ -228,15 +302,16 @@
 
   <!-- ================= ACTIVE WEBRTC CALL MODAL ================= -->
   <div id="call-modal" class="active-call-modal" style="display: none;">
-    <div class="video-stage">
+    <div id="video-stage" class="video-stage">
       <video id="remote-video" autoplay playsinline></video>
 
-      <!-- Fallback Avatar when in Voice Call -->
+      <!-- Fallback Avatar when in Voice Call or Earpiece Mode -->
       <div id="audio-call-placeholder" class="audio-placeholder" style="display: none;">
         <div class="radar-avatar large">
           <span id="active-call-avatar">U</span>
         </div>
         <h3 id="active-call-username">Connected</h3>
+        <p id="audio-mode-label" class="audio-mode-sub">👂 Normal Call (Earpiece Mode)</p>
       </div>
 
       <!-- Top Call Info Pill -->
@@ -245,14 +320,11 @@
         <span id="call-timer">00:00</span>
       </div>
 
-      <!-- Floating Audio Route Toast -->
-      <div id="call-toast" class="call-toast" style="display: none;">
-        <span id="call-toast-icon">🔊</span>
-        <span id="call-toast-text">Speakerphone</span>
-      </div>
+      <!-- Remote Partner Mute/Camera Status Badge -->
+      <div id="remote-status-pill" class="remote-status-pill" style="display: none;"></div>
 
-      <!-- Floating Local Camera PiP -->
-      <div id="local-video-wrap" class="local-video-pip">
+      <!-- Floating Local Camera PiP (Tap to Swap Fullscreen!) -->
+      <div id="local-video-wrap" class="local-video-pip" title="Tap to swap video size">
         <video id="local-video" muted autoplay playsinline></video>
       </div>
 
@@ -260,36 +332,9 @@
       <div class="call-controls-bar">
         <button type="button" id="toggle-mic-btn" class="ctrl-btn" title="Mute/Unmute Mic">🎤</button>
         <button type="button" id="toggle-cam-btn" class="ctrl-btn" title="Camera On/Off">📷</button>
-        <button type="button" id="toggle-audio-route-btn" class="ctrl-btn" title="Audio Output: Speakerphone (Click to switch to Earpiece)">🔊</button>
+        <button type="button" id="flip-cam-btn" class="ctrl-btn" title="Flip Front/Back Camera">🔄</button>
+        <button type="button" id="toggle-speaker-btn" class="ctrl-btn" title="Switch Earpiece / Speaker">👂</button>
         <button type="button" id="end-call-btn" class="ctrl-btn end-call" title="End Call">🛑</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ================= SETTINGS MODAL ================= -->
-  <div id="settings-modal" class="modal-overlay" style="display: none;">
-    <div class="settings-dialog">
-      <div class="modal-header">
-        <div class="modal-title-wrap">
-          <span class="modal-title-icon">⚙️</span>
-          <h3>Settings</h3>
-        </div>
-        <button type="button" id="close-settings-btn" class="icon-btn" title="Close Settings">✕</button>
-      </div>
-      <div class="modal-body">
-        <div class="setting-item">
-          <div class="setting-info">
-            <span class="setting-label">Message Notifications (Sound)</span>
-            <span class="setting-desc">Play a subtle audio chime when a private message arrives</span>
-          </div>
-          <label class="toggle-switch" for="toggle-sound-notifications" aria-label="Toggle Message Notifications Sound">
-            <input type="checkbox" id="toggle-sound-notifications" />
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" id="save-settings-btn" class="primary-btn sm">Done</button>
       </div>
     </div>
   </div>
