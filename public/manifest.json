@@ -1,0 +1,8 @@
+{
+  "name": "MINI-WORLD",
+  "short_name": "MINI-WORLD",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b141a",
+  "theme_color": "#111b21"
+}

@@ -1,7 +1,7 @@
 {
-  "name": "lightweight-chat",
-  "version": "1.0.0",
-  "description": "Real-time 1-on-1 chat app for Render",
+  "name": "mini-world",
+  "version": "2.0.0",
+  "description": "Private 1-on-1 messaging and WebRTC calling",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -10,6 +10,7 @@
   "dependencies": {
     "express": "^4.19.2",
     "pg": "^8.23.1",
-    "socket.io": "^4.7.5"
+    "socket.io": "^4.7.5",
+    "web-push": "^3.6.7"
   }
 }
