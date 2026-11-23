@@ -84,8 +84,7 @@ function verifyAuthToken(username, token) {
   return crypto.timingSafeEqual(a, b);
 }
 
-// Simple In-Memory Brute-Force Rate Limiter
-const authAttempts = new Map(); // ip -> { count, resetAt }
+const authAttempts = new Map();
 function checkRateLimit(req, res) {
   const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'local';
   const now = Date.now();
@@ -431,7 +430,6 @@ app.post('/login', async (req, res) => {
       if (result.rows.length === 0 || !verifySecret(password, result.rows[0].password)) {
         return res.status(401).json({ error: 'Invalid username or password.' });
       }
-      // Auto-upgrade legacy plaintext password to scrypt hash
       if (!String(result.rows[0].password).startsWith('scrypt:')) {
         await pool.query('UPDATE users SET password = $1 WHERE id = $2', [hashSecret(password), result.rows[0].id]);
       }
@@ -795,7 +793,6 @@ io.on('connection', async (socket) => {
     return;
   }
 
-  // Verify token if provided
   if (token && !verifyAuthToken(rawUsername, token)) {
     socket.emit('account-deleted');
     socket.disconnect();
@@ -943,6 +940,53 @@ io.on('connection', async (socket) => {
     if (to && isUserOnline(to)) {
       emitToUser(to, 'heart-shower', { from: username });
     }
+  });
+
+  // ================= GAME MODE & WATCH TOGETHER SYNC =================
+
+  socket.on('ttt-move', async ({ to, board, turn, winner, isDraw }) => {
+    if (!to || !Array.isArray(board)) return;
+    if (!(await areFriends(username, to))) return;
+    const payload = { from: username, board, turn, winner, isDraw };
+    emitToUser(username, 'ttt-state', payload);
+    if (isUserOnline(to)) emitToUser(to, 'ttt-state', payload);
+  });
+
+  socket.on('ttt-reset', async ({ to }) => {
+    if (!to) return;
+    if (!(await areFriends(username, to))) return;
+    const payload = { from: username };
+    emitToUser(username, 'ttt-reset', payload);
+    if (isUserOnline(to)) emitToUser(to, 'ttt-reset', payload);
+  });
+
+  socket.on('wyr-pick', async ({ to, roundIndex, choice }) => {
+    if (!to || !choice) return;
+    if (!(await areFriends(username, to))) return;
+    const payload = { picker: username, roundIndex, choice };
+    emitToUser(username, 'wyr-update', payload);
+    if (isUserOnline(to)) emitToUser(to, 'wyr-update', payload);
+  });
+
+  socket.on('wyr-next', async ({ to, roundIndex }) => {
+    if (!to) return;
+    if (!(await areFriends(username, to))) return;
+    const payload = { roundIndex };
+    emitToUser(username, 'wyr-next', payload);
+    if (isUserOnline(to)) emitToUser(to, 'wyr-next', payload);
+  });
+
+  socket.on('yt-sync', async ({ to, videoId, action, timeSec }) => {
+    if (!to) return;
+    if (!(await areFriends(username, to))) return;
+    const payload = {
+      from: username,
+      videoId: videoId || null,
+      action: action || 'load',
+      timeSec: typeof timeSec === 'number' ? timeSec : 0
+    };
+    emitToUser(username, 'yt-sync', payload);
+    if (isUserOnline(to)) emitToUser(to, 'yt-sync', payload);
   });
 
   socket.on('mark-seen', async ({ friend }) => {

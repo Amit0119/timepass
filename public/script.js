@@ -4,10 +4,31 @@ let currentAuthToken = localStorage.getItem('ps_token') || null;
 let activeFriend = null;
 let socialState = { friends: [], requests: [], discover: [] };
 let typingTimeout = null;
+let remoteTypingTimer = null;
 let replyingToMessage = null;
 let lastRenderedDateKey = null;
 let toastTimer = null;
 let swRegistration = null;
+
+// Game Mode & Watch Together State
+let tttBoard = Array(9).fill(null);
+let tttTurn = '❤️';
+let tttWinner = null;
+let tttDraw = false;
+let tttWinLine = [];
+let lastAnnouncedWinKey = null;
+
+const wyrQuestions = [
+  { q: 'Movie night at home or long drive with music?', a: 'Movie night at home', b: 'Long drive with music' },
+  { q: 'Early morning chai/coffee or late night snacks?', a: 'Early morning chai/coffee', b: 'Late night snacks' },
+  { q: 'Beach vacation or hill station trip?', a: 'Beach vacation', b: 'Hill station trip' },
+  { q: 'Surprise gift or a handwritten note?', a: 'Surprise gift', b: 'Handwritten note' },
+  { q: 'Cozy rainy day indoors or sunny weekend outing?', a: 'Cozy rainy day indoors', b: 'Sunny weekend outing' }
+];
+let wyrRoundIndex = 0;
+let wyrPicks = {};
+
+let ytVideoId = null;
 
 const userSettings = {
   soundEnabled: localStorage.getItem('ps_sound') === 'true',
@@ -37,15 +58,36 @@ const rtcConfig = {
   ]
 };
 
-// DOM Elements - Romantic Stage, Kittens, In-App Toast & Confirm Modal
+// DOM Elements - Romantic Stage, Kittens, Typing Pill, Toast & Confirm Modal
 const heartShowerStage = document.getElementById('heart-shower-stage');
 const cuteKittensStage = document.getElementById('cute-kittens-stage');
+const liveTypingPill = document.getElementById('live-typing-pill');
+const liveTypingText = document.getElementById('live-typing-text');
 const appToast = document.getElementById('app-toast');
 const appConfirmModal = document.getElementById('app-confirm-modal');
 const confirmTitle = document.getElementById('confirm-title');
 const confirmMessage = document.getElementById('confirm-message');
 const confirmCancelBtn = document.getElementById('confirm-cancel-btn');
 const confirmOkBtn = document.getElementById('confirm-ok-btn');
+
+// DOM Elements - Game Mode & Watch Together
+const openGameModeBtn = document.getElementById('open-game-mode-btn');
+const gameModeModal = document.getElementById('game-mode-modal');
+const closeGameModeBtn = document.getElementById('close-game-mode-btn');
+const gameTabs = document.querySelectorAll('.game-tab');
+const tttRoleHint = document.getElementById('ttt-role-hint');
+const tttStatusEl = document.getElementById('ttt-status');
+const tttBoardEl = document.getElementById('ttt-board');
+const tttResetBtn = document.getElementById('ttt-reset-btn');
+const wyrQuestionEl = document.getElementById('wyr-question');
+const wyrOptA = document.getElementById('wyr-opt-a');
+const wyrOptB = document.getElementById('wyr-opt-b');
+const wyrPicksInfo = document.getElementById('wyr-picks-info');
+const wyrNextBtn = document.getElementById('wyr-next-btn');
+const ytLoadForm = document.getElementById('yt-load-form');
+const ytUrlInput = document.getElementById('yt-url-input');
+const ytEmptyMsg = document.getElementById('yt-empty-msg');
+const ytIframe = document.getElementById('yt-iframe');
 
 // DOM Elements - Auth
 const authContainer = document.getElementById('auth-container');
@@ -164,13 +206,257 @@ toggleSoundCheckbox.checked = userSettings.soundEnabled;
 toggleVibrateCheckbox.checked = userSettings.vibrateEnabled;
 toggleAutologinCheckbox.checked = userSettings.autoLogin;
 
+// ================= MOBILE KEYBOARD VIEWPORT SYNC =================
+
+function syncMobileViewportHeight() {
+  if (window.visualViewport) {
+    const vv = window.visualViewport;
+    document.documentElement.style.setProperty('--app-height', `${Math.round(vv.height)}px`);
+    const isKeyboardVisible = window.innerHeight - vv.height > 120;
+    document.body.classList.toggle('keyboard-open', isKeyboardVisible);
+    if (isKeyboardVisible) {
+      setTimeout(scrollToBottom, 80);
+    }
+  } else {
+    document.documentElement.style.setProperty('--app-height', `${window.innerHeight}px`);
+  }
+}
+
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', syncMobileViewportHeight);
+  window.visualViewport.addEventListener('scroll', syncMobileViewportHeight);
+}
+window.addEventListener('resize', syncMobileViewportHeight);
+
 window.addEventListener('DOMContentLoaded', () => {
+  syncMobileViewportHeight();
   initRomanticBackgroundCanvas();
+  initGameModeCanvas();
+  renderTicTacToe();
+  renderWouldYouRather();
   const savedUser = localStorage.getItem('ps_username');
   if (userSettings.autoLogin && savedUser) {
     enterApp(savedUser, currentAuthToken);
   }
 });
+
+// ================= WIN SOUND EFFECT =================
+
+function playWinSound() {
+  try {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    const notes = [523.25, 659.25, 783.99, 1046.5];
+    notes.forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      const startAt = ctx.currentTime + idx * 0.11;
+      osc.frequency.setValueAtTime(freq, startAt);
+      gain.gain.setValueAtTime(0.18, startAt);
+      gain.gain.exponentialRampToValueAtTime(0.001, startAt + 0.28);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(startAt);
+      osc.stop(startAt + 0.3);
+    });
+  } catch (e) {}
+}
+
+// ================= GAME MODE, STRICT TURN TIC-TAC-TOE & WATCH TOGETHER =================
+
+function getMyTTTSymbol() {
+  if (!currentUser || !activeFriend) return '❤️';
+  return currentUser.toLowerCase() < activeFriend.toLowerCase() ? '❤️' : '✨';
+}
+
+function getPartnerTTTSymbol() {
+  return getMyTTTSymbol() === '❤️' ? '✨' : '❤️';
+}
+
+if (openGameModeBtn) {
+  openGameModeBtn.addEventListener('click', () => {
+    if (!activeFriend) {
+      showToast('Connect with your partner first.', 'error');
+      return;
+    }
+    renderTicTacToe();
+    renderWouldYouRather();
+    gameModeModal.style.display = 'flex';
+  });
+}
+
+if (closeGameModeBtn) {
+  closeGameModeBtn.addEventListener('click', () => {
+    gameModeModal.style.display = 'none';
+  });
+}
+
+gameTabs.forEach(tab => {
+  tab.addEventListener('click', () => {
+    gameTabs.forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    const target = tab.dataset.gtab;
+    document.querySelectorAll('.game-panel').forEach(p => p.classList.remove('active'));
+    const panel = document.getElementById(`gtab-${target}`);
+    if (panel) panel.classList.add('active');
+  });
+});
+
+function getWinningLine(board) {
+  const lines = [
+    [0, 1, 2], [3, 4, 5], [6, 7, 8],
+    [0, 3, 6], [1, 4, 7], [2, 5, 8],
+    [0, 4, 8], [2, 4, 6]
+  ];
+  for (const line of lines) {
+    const [a, b, c] = line;
+    if (board[a] && board[a] === board[b] && board[a] === board[c]) {
+      return { winner: board[a], line };
+    }
+  }
+  return { winner: null, line: [] };
+}
+
+function renderTicTacToe() {
+  if (!tttBoardEl || !tttStatusEl) return;
+  tttBoardEl.innerHTML = '';
+
+  const mySymbol = getMyTTTSymbol();
+  const partnerSymbol = getPartnerTTTSymbol();
+  const isMyTurn = !tttWinner && !tttDraw && tttTurn === mySymbol;
+
+  if (tttRoleHint && activeFriend) {
+    tttRoleHint.textContent = `You: ${mySymbol} • ${activeFriend}: ${partnerSymbol}`;
+  }
+
+  if (tttWinner) {
+    const wonByMe = tttWinner === mySymbol;
+    tttStatusEl.textContent = wonByMe
+      ? `You (${mySymbol}) won the round!`
+      : `${activeFriend || 'Partner'} (${tttWinner}) won the round`;
+    const winKey = `${tttWinner}-${tttBoard.join('')}`;
+    if (wonByMe && lastAnnouncedWinKey !== winKey) {
+      lastAnnouncedWinKey = winKey;
+      playWinSound();
+    }
+  } else if (tttDraw) {
+    tttStatusEl.textContent = 'Draw game — tap Restart Match';
+  } else {
+    tttStatusEl.textContent = isMyTurn
+      ? `Your turn (${mySymbol})`
+      : `Waiting for ${activeFriend || 'partner'} (${tttTurn})...`;
+  }
+
+  tttBoard.forEach((cell, idx) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ttt-cell';
+    if (tttWinLine.includes(idx)) btn.classList.add('win-cell');
+    btn.textContent = cell || '';
+    btn.disabled = Boolean(cell || tttWinner || tttDraw || !isMyTurn);
+
+    btn.addEventListener('click', () => {
+      if (cell || tttWinner || tttDraw || !isMyTurn || !activeFriend || !socket) return;
+      const nextBoard = tttBoard.slice();
+      nextBoard[idx] = mySymbol;
+      const outcome = getWinningLine(nextBoard);
+      const draw = !outcome.winner && nextBoard.every(Boolean);
+      const nextTurn = mySymbol === '❤️' ? '✨' : '❤️';
+      socket.emit('ttt-move', {
+        to: activeFriend,
+        board: nextBoard,
+        turn: nextTurn,
+        winner: outcome.winner,
+        isDraw: draw
+      });
+    });
+    tttBoardEl.appendChild(btn);
+  });
+}
+
+if (tttResetBtn) {
+  tttResetBtn.addEventListener('click', () => {
+    if (!activeFriend || !socket) return;
+    socket.emit('ttt-reset', { to: activeFriend });
+  });
+}
+
+function renderWouldYouRather() {
+  if (!wyrQuestionEl || !wyrOptA || !wyrOptB || !wyrPicksInfo) return;
+  const item = wyrQuestions[wyrRoundIndex % wyrQuestions.length];
+  wyrQuestionEl.textContent = item.q;
+  wyrOptA.textContent = `A: ${item.a}`;
+  wyrOptB.textContent = `B: ${item.b}`;
+
+  const myKey = (currentUser || '').toLowerCase();
+  const myPick = wyrPicks[myKey];
+  wyrOptA.classList.toggle('picked', myPick === 'A');
+  wyrOptB.classList.toggle('picked', myPick === 'B');
+
+  const entries = Object.entries(wyrPicks);
+  if (entries.length === 0) {
+    wyrPicksInfo.textContent = 'No picks yet';
+  } else if (entries.length === 1) {
+    const who = entries[0][0] === myKey ? 'You' : entries[0][0];
+    wyrPicksInfo.textContent = `${who} picked ${entries[0][1]} • Waiting for partner...`;
+  } else {
+    const same = entries[0][1] === entries[1][1];
+    wyrPicksInfo.textContent = same
+      ? `Both matched on Option ${entries[0][1]}!`
+      : `${entries[0][0]} picked ${entries[0][1]} • ${entries[1][0]} picked ${entries[1][1]}`;
+  }
+}
+
+function sendWyrPick(choice) {
+  if (!activeFriend || !socket) return;
+  socket.emit('wyr-pick', {
+    to: activeFriend,
+    roundIndex: wyrRoundIndex,
+    choice
+  });
+}
+
+if (wyrOptA) wyrOptA.addEventListener('click', () => sendWyrPick('A'));
+if (wyrOptB) wyrOptB.addEventListener('click', () => sendWyrPick('B'));
+if (wyrNextBtn) {
+  wyrNextBtn.addEventListener('click', () => {
+    if (!activeFriend || !socket) return;
+    const nextIdx = (wyrRoundIndex + 1) % wyrQuestions.length;
+    socket.emit('wyr-next', { to: activeFriend, roundIndex: nextIdx });
+  });
+}
+
+function extractYouTubeId(rawInput) {
+  const val = String(rawInput || '').trim();
+  if (/^[a-zA-Z0-9_-]{11}$/.test(val)) return val;
+  const match = val.match(/(?:v=|\/embed\/|youtu\.be\/|\/shorts\/)([a-zA-Z0-9_-]{11})/);
+  return match ? match[1] : null;
+}
+
+function applyYouTubeVideo(videoId) {
+  if (!videoId) return;
+  ytVideoId = videoId;
+  if (ytEmptyMsg) ytEmptyMsg.style.display = 'none';
+  if (ytIframe) {
+    ytIframe.style.display = 'block';
+    ytIframe.src = `https://www.youtube.com/embed/${videoId}?autoplay=0&rel=0`;
+  }
+}
+
+if (ytLoadForm) {
+  ytLoadForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (!activeFriend || !socket) return;
+    const vid = extractYouTubeId(ytUrlInput.value);
+    if (!vid) {
+      showToast('Enter a valid YouTube link or 11-character video ID.', 'error');
+      return;
+    }
+    socket.emit('yt-sync', { to: activeFriend, videoId: vid, action: 'load', timeSec: 0 });
+    ytUrlInput.value = '';
+  });
+}
 
 // Interactive Kittens Click/Tap Reaction
 if (cuteKittensStage) {
@@ -185,37 +471,39 @@ if (cuteKittensStage) {
   });
 }
 
-// ================= LIVE ROMANTIC CANVAS BACKGROUND (HEARTS & FIREFLIES) =================
+// ================= SHARED CANVAS PARTICLE ENGINE (MAIN & GAME MODE) =================
 
-function initRomanticBackgroundCanvas() {
-  const canvas = document.getElementById('romantic-bg-canvas');
+function mountParticleCanvas(canvasId, hueStart, hueRange, glowColor) {
+  const canvas = document.getElementById(canvasId);
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
-  let width = (canvas.width = window.innerWidth);
-  let height = (canvas.height = window.innerHeight);
+  let width = (canvas.width = canvas.clientWidth || window.innerWidth);
+  let height = (canvas.height = canvas.clientHeight || window.innerHeight);
 
-  window.addEventListener('resize', () => {
-    width = canvas.width = window.innerWidth;
-    height = canvas.height = window.innerHeight;
-  });
+  const resizeCanvas = () => {
+    width = canvas.width = canvas.clientWidth || window.innerWidth;
+    height = canvas.height = canvas.clientHeight || window.innerHeight;
+  };
+  window.addEventListener('resize', resizeCanvas);
 
   const particles = [];
   const sparkles = [];
-  const totalParticles = window.innerWidth < 768 ? 34 : 56;
+  const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+  const totalParticles = window.innerWidth < 768 ? 36 : 56;
 
   function createParticle(randomY = true) {
     const isHeart = Math.random() < 0.44;
     return {
       x: Math.random() * width,
       y: randomY ? Math.random() * height : height + 25,
-      size: isHeart ? 7 + Math.random() * 11 : 1.5 + Math.random() * 3,
+      size: isHeart ? 8 + Math.random() * 11 : 1.6 + Math.random() * 3,
       speedY: 0.25 + Math.random() * 0.55,
       swayAmp: 0.3 + Math.random() * 0.8,
       swaySpeed: 0.008 + Math.random() * 0.018,
       phase: Math.random() * Math.PI * 2,
-      alpha: 0.22 + Math.random() * 0.55,
+      alpha: 0.24 + Math.random() * 0.55,
       isHeart,
-      hue: 315 + Math.random() * 45
+      hue: hueStart + Math.random() * hueRange
     };
   }
 
@@ -248,27 +536,43 @@ function initRomanticBackgroundCanvas() {
     ctx.closePath();
   }
 
-  const addSparkle = (x, y) => {
-    if (sparkles.length > 35) return;
-    sparkles.push({
-      x: x + (Math.random() - 0.5) * 16,
-      y: y + (Math.random() - 0.5) * 16,
-      size: 5 + Math.random() * 6,
-      alpha: 0.85,
-      vy: -0.6 - Math.random() * 0.8
-    });
+  const addSparkle = (x, y, burstCount = 1) => {
+    const maxCap = isTouchDevice ? 70 : 40;
+    for (let k = 0; k < burstCount; k++) {
+      if (sparkles.length >= maxCap) break;
+      const baseSize = isTouchDevice ? 11 + Math.random() * 9 : 6 + Math.random() * 6;
+      sparkles.push({
+        x: x + (Math.random() - 0.5) * (isTouchDevice ? 26 : 16),
+        y: y + (Math.random() - 0.5) * (isTouchDevice ? 26 : 16),
+        size: baseSize,
+        alpha: 0.95,
+        vy: -0.65 - Math.random() * 0.85,
+        hue: hueStart + Math.random() * hueRange
+      });
+    }
   };
 
+  let lastTouchSparkleAt = 0;
   window.addEventListener('mousemove', (e) => {
-    if (Math.random() < 0.28) addSparkle(e.clientX, e.clientY);
+    if (Math.random() < 0.32) addSparkle(e.clientX, e.clientY, 1);
   });
+
+  window.addEventListener('touchstart', (e) => {
+    if (e.touches[0]) addSparkle(e.touches[0].clientX, e.touches[0].clientY, 3);
+  }, { passive: true });
+
   window.addEventListener('touchmove', (e) => {
-    if (e.touches[0] && Math.random() < 0.4) {
-      addSparkle(e.touches[0].clientX, e.touches[0].clientY);
+    const now = Date.now();
+    if (e.touches[0] && now - lastTouchSparkleAt > 35) {
+      lastTouchSparkleAt = now;
+      addSparkle(e.touches[0].clientX, e.touches[0].clientY, 2);
     }
   }, { passive: true });
 
   function renderFrame() {
+    if (canvas.clientWidth && canvas.clientHeight && (width !== canvas.clientWidth || height !== canvas.clientHeight)) {
+      resizeCanvas();
+    }
     ctx.clearRect(0, 0, width, height);
 
     for (let i = 0; i < particles.length; i++) {
@@ -292,8 +596,8 @@ function initRomanticBackgroundCanvas() {
         ctx.fill();
       } else {
         ctx.beginPath();
-        ctx.fillStyle = `hsla(330, 100%, 88%, ${p.alpha * twinkle})`;
-        ctx.shadowColor = 'rgba(244, 114, 182, 0.8)';
+        ctx.fillStyle = `hsla(${hueStart + 10}, 100%, 88%, ${p.alpha * twinkle})`;
+        ctx.shadowColor = glowColor;
         ctx.shadowBlur = 8;
         ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
         ctx.fill();
@@ -304,15 +608,15 @@ function initRomanticBackgroundCanvas() {
     for (let i = sparkles.length - 1; i >= 0; i--) {
       const s = sparkles[i];
       s.y += s.vy;
-      s.alpha -= 0.024;
+      s.alpha -= 0.018;
       if (s.alpha <= 0) {
         sparkles.splice(i, 1);
         continue;
       }
       ctx.save();
-      ctx.fillStyle = `rgba(249, 168, 212, ${s.alpha})`;
-      ctx.shadowColor = 'rgba(236, 72, 153, 0.8)';
-      ctx.shadowBlur = 8;
+      ctx.fillStyle = `hsla(${s.hue}, 95%, 74%, ${s.alpha})`;
+      ctx.shadowColor = glowColor;
+      ctx.shadowBlur = 10;
       drawHeartPath(s.x, s.y, s.size);
       ctx.fill();
       ctx.restore();
@@ -324,11 +628,19 @@ function initRomanticBackgroundCanvas() {
   requestAnimationFrame(renderFrame);
 }
 
+function initRomanticBackgroundCanvas() {
+  mountParticleCanvas('romantic-bg-canvas', 315, 45, 'rgba(244, 114, 182, 0.85)');
+}
+
+function initGameModeCanvas() {
+  mountParticleCanvas('game-mode-canvas', 192, 26, 'rgba(56, 189, 248, 0.85)');
+}
+
 // ================= FLOATING HEART SHOWER =================
 
 function spawnHeartShower(count = 16) {
   if (!heartShowerStage) return;
-  const emojis = ['💖', '💗', '🪷', '💕', '💝','🍼','dudu'];
+  const emojis = ['💖', '💗', '❤️', '💕', '🐾'];
   for (let i = 0; i < count; i++) {
     setTimeout(() => {
       const heart = document.createElement('span');
@@ -729,6 +1041,7 @@ function enterApp(username, token) {
 
   authContainer.style.display = 'none';
   chatContainer.style.display = 'flex';
+  syncMobileViewportHeight();
 
   connectSocket();
   syncPushSubscription(false);
@@ -742,7 +1055,9 @@ function forceLogoutToAuth(msg) {
   currentAuthToken = null;
   activeFriend = null;
   messagesList.innerHTML = '';
+  if (liveTypingPill) liveTypingPill.style.display = 'none';
   settingsModal.style.display = 'none';
+  if (gameModeModal) gameModeModal.style.display = 'none';
   if (deleteAccountInlineForm) deleteAccountInlineForm.style.display = 'none';
   chatContainer.style.display = 'none';
   authContainer.style.display = 'flex';
@@ -924,6 +1239,28 @@ sideTabs.forEach(btn => {
   btn.addEventListener('click', () => switchSidebarTab(btn.dataset.tab));
 });
 
+// ================= TYPING STATUS HELPERS =================
+
+function showRemoteTypingUI(fromUser) {
+  headerSubtitle.textContent = 'typing...';
+  headerSubtitle.classList.add('typing-glow');
+  if (liveTypingPill && liveTypingText) {
+    liveTypingText.textContent = `${fromUser} is typing...`;
+    liveTypingPill.style.display = 'inline-flex';
+  }
+  clearTimeout(remoteTypingTimer);
+  remoteTypingTimer = setTimeout(() => {
+    hideRemoteTypingUI();
+  }, 2500);
+}
+
+function hideRemoteTypingUI() {
+  clearTimeout(remoteTypingTimer);
+  headerSubtitle.classList.remove('typing-glow');
+  if (liveTypingPill) liveTypingPill.style.display = 'none';
+  updateActiveFriendHeader();
+}
+
 // ================= SOCKET.IO & CHAT =================
 
 function connectSocket() {
@@ -948,6 +1285,7 @@ function connectSocket() {
       if (!stillFriends) {
         activeFriend = null;
         messagesList.innerHTML = '';
+        hideRemoteTypingUI();
         emptyChatState.style.display = 'block';
         headerCallActions.style.display = 'none';
         if (heartShowerBtn) heartShowerBtn.disabled = true;
@@ -955,6 +1293,7 @@ function connectSocket() {
         headerSubtitle.textContent = 'Waiting for your partner...';
       } else {
         updateActiveFriendHeader();
+        renderTicTacToe();
       }
     }
   });
@@ -975,6 +1314,7 @@ function connectSocket() {
        (msg.username.toLowerCase() === activeFriend.toLowerCase() && msg.recipient.toLowerCase() === currentUser.toLowerCase()));
 
     if (!isMine) {
+      hideRemoteTypingUI();
       playMessageBeep();
       if (userSettings.vibrateEnabled && navigator.vibrate) {
         navigator.vibrate(150);
@@ -997,6 +1337,52 @@ function connectSocket() {
     spawnHeartShower(16);
   });
 
+  socket.on('ttt-state', ({ board, turn, winner, isDraw }) => {
+    if (Array.isArray(board)) tttBoard = board;
+    if (turn) tttTurn = turn;
+    tttWinner = winner || null;
+    tttDraw = Boolean(isDraw);
+    const outcome = getWinningLine(tttBoard);
+    tttWinLine = outcome.line || [];
+    renderTicTacToe();
+  });
+
+  socket.on('ttt-reset', () => {
+    tttBoard = Array(9).fill(null);
+    tttTurn = '❤️';
+    tttWinner = null;
+    tttDraw = false;
+    tttWinLine = [];
+    lastAnnouncedWinKey = null;
+    renderTicTacToe();
+  });
+
+  socket.on('wyr-update', ({ picker, roundIndex, choice }) => {
+    if (typeof roundIndex === 'number' && roundIndex !== wyrRoundIndex) {
+      wyrRoundIndex = roundIndex;
+      wyrPicks = {};
+    }
+    if (picker && choice) {
+      wyrPicks[String(picker).toLowerCase()] = choice;
+    }
+    renderWouldYouRather();
+  });
+
+  socket.on('wyr-next', ({ roundIndex }) => {
+    wyrRoundIndex = typeof roundIndex === 'number' ? roundIndex : (wyrRoundIndex + 1) % wyrQuestions.length;
+    wyrPicks = {};
+    renderWouldYouRather();
+  });
+
+  socket.on('yt-sync', ({ from, videoId }) => {
+    if (videoId) {
+      applyYouTubeVideo(videoId);
+      if (from && from.toLowerCase() !== currentUser.toLowerCase()) {
+        showToast(`${from} loaded a YouTube video`, 'info');
+      }
+    }
+  });
+
   socket.on('messages-seen', ({ by }) => {
     if (!activeFriend || by.toLowerCase() !== activeFriend.toLowerCase()) return;
     document.querySelectorAll('.seen-status').forEach(el => {
@@ -1007,15 +1393,13 @@ function connectSocket() {
 
   socket.on('typing', ({ from }) => {
     if (activeFriend && from.toLowerCase() === activeFriend.toLowerCase()) {
-      headerSubtitle.textContent = '💗 typing...';
-      headerSubtitle.classList.add('typing-glow');
+      showRemoteTypingUI(from);
     }
   });
 
   socket.on('stop-typing', ({ from }) => {
     if (activeFriend && from.toLowerCase() === activeFriend.toLowerCase()) {
-      headerSubtitle.classList.remove('typing-glow');
-      updateActiveFriendHeader();
+      hideRemoteTypingUI();
     }
   });
 
@@ -1132,7 +1516,7 @@ function renderSocialLists() {
             <div class="user-card-name">${escapeHTML(f.username)}</div>
             <div class="user-card-sub">
               <span class="${f.online ? 'dot-online' : 'dot-offline'}"></span>
-              ${f.online ? '💗 Online' : formatLastSeen(f.last_seen)}
+              ${f.online ? 'online' : formatLastSeen(f.last_seen)}
             </div>
           </div>
         </div>
@@ -1162,10 +1546,11 @@ function selectFriend(friendName) {
   messageInput.disabled = false;
   sendBtn.disabled = false;
   if (heartShowerBtn) heartShowerBtn.disabled = false;
-  messageInput.placeholder = `Message ${friendName}...`;
+  messageInput.placeholder = `Message`;
 
   clearReplyPreview();
   updateActiveFriendHeader();
+  renderTicTacToe();
   renderSocialLists();
   socket.emit('load-private-chat', { friend: friendName });
 }
@@ -1177,9 +1562,11 @@ function updateActiveFriendHeader() {
 
   headerAvatar.textContent = activeFriend.charAt(0).toUpperCase();
   headerTitle.textContent = activeFriend;
-  headerSubtitle.textContent = isOnline
-    ? '💗 Online'
-    : formatLastSeen(friendObj ? friendObj.last_seen : null);
+  if (!headerSubtitle.classList.contains('typing-glow')) {
+    headerSubtitle.textContent = isOnline
+      ? 'online'
+      : formatLastSeen(friendObj ? friendObj.last_seen : null);
+  }
   headerCallActions.style.display = 'flex';
 }
 
@@ -1193,6 +1580,7 @@ function setReplyPreview(msg) {
   replyPreviewText.textContent = msg.text;
   replyPreviewBar.style.display = 'flex';
   messageInput.focus();
+  setTimeout(scrollToBottom, 80);
 }
 
 function clearReplyPreview() {
@@ -1201,6 +1589,11 @@ function clearReplyPreview() {
 }
 
 if (cancelReplyBtn) cancelReplyBtn.addEventListener('click', clearReplyPreview);
+
+messageInput.addEventListener('focus', () => {
+  syncMobileViewportHeight();
+  setTimeout(scrollToBottom, 180);
+});
 
 messageInput.addEventListener('input', () => {
   if (!activeFriend || !socket) return;
@@ -1233,6 +1626,7 @@ chatForm.addEventListener('submit', (e) => {
   socket.emit('stop-typing', { to: activeFriend });
   messageInput.value = '';
   clearReplyPreview();
+  messageInput.focus();
 });
 
 function getDateChipLabel(isoString) {
