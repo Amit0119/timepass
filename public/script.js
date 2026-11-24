@@ -10,25 +10,7 @@ let lastRenderedDateKey = null;
 let toastTimer = null;
 let swRegistration = null;
 
-// Game Mode & Watch Together State
-let tttBoard = Array(9).fill(null);
-let tttTurn = '❤️';
-let tttWinner = null;
-let tttDraw = false;
-let tttWinLine = [];
-let lastAnnouncedWinKey = null;
-
-const wyrQuestions = [
-  { q: 'Movie night at home or long drive with music?', a: 'Movie night at home', b: 'Long drive with music' },
-  { q: 'Early morning chai/coffee or late night snacks?', a: 'Early morning chai/coffee', b: 'Late night snacks' },
-  { q: 'Beach vacation or hill station trip?', a: 'Beach vacation', b: 'Hill station trip' },
-  { q: 'Surprise gift or a handwritten note?', a: 'Surprise gift', b: 'Handwritten note' },
-  { q: 'Cozy rainy day indoors or sunny weekend outing?', a: 'Cozy rainy day indoors', b: 'Sunny weekend outing' }
-];
-let wyrRoundIndex = 0;
-let wyrPicks = {};
-
-let ytVideoId = null;
+// ================= USER SETTINGS =================
 
 const userSettings = {
   soundEnabled: localStorage.getItem('ps_sound') === 'true',
@@ -36,7 +18,100 @@ const userSettings = {
   autoLogin: localStorage.getItem('ps_autologin') !== 'false'
 };
 
-// WebRTC State
+// ================= SHARED CUSTOM GAME SONGS STATE =================
+
+let gameAudioMeta = { win: null, lose: null };
+const gameSongPlayer = new Audio();
+gameSongPlayer.preload = 'auto';
+let gameSongStopTimer = null;
+let previewObjectUrl = null;
+
+// ================= GAME MODE, WATCH & DOODLE STATE =================
+
+// 1. Tic-Tac-Toe State
+let tttState = {
+  board: Array(9).fill(null),
+  turnUser: null,
+  winnerUser: null,
+  winnerSymbol: null,
+  isDraw: false,
+  symbols: {},
+  scores: {},
+  lastDare: null
+};
+let tttWinLine = [];
+let tttMovePending = false;
+let lastAnnouncedTttWinKey = null;
+
+// 2. Mind Sync (Telepathy Test) State
+const mindPrompts = [
+  'Favorite street food to eat together?',
+  'Dream vacation spot for both of us?',
+  'Best late-night snack?',
+  'Go-to comfort movie or show?',
+  'Chai or Coffee on a rainy day?',
+  'One word that describes our vibe?',
+  'Who takes longer to get ready?',
+  'First thing you would buy if we won 1 crore?',
+  'Favorite ice cream flavor?',
+  'Beach sunset or mountain sunrise?'
+];
+let mindState = {
+  promptIndex: 0,
+  customPrompt: null,
+  answers: {},
+  revealed: false,
+  streak: 0,
+  matched: false
+};
+let lastAnnouncedMindKey = null;
+
+// 3. Emoji RPS State
+const RPS_EMOJI_MAP = { rock: '✊', paper: '✋', scissors: '✌️' };
+let rpsState = {
+  round: 1,
+  lockedUsers: [],
+  myPick: null,
+  scores: {},
+  lastResult: null,
+  matchWinner: null
+};
+let lastAnnouncedRpsRound = 0;
+
+// 4. 30-Second Heart Catch Battle State
+let catchState = {
+  active: false,
+  endTime: 0,
+  scores: {},
+  winnerUser: null
+};
+let catchSpawnInterval = null;
+let catchTimerInterval = null;
+let lastAnnouncedCatchEnd = 0;
+
+// 5. Watch Together State
+let ytVideoId = null;
+
+// 6. Shared Doodle State
+let doodleStrokes = [];
+let doodleColor = '#38bdf8';
+let doodleSize = 4;
+let isDoodling = false;
+let lastDoodlePos = null;
+let doodleCtx = null;
+
+// 7. Dudu-Bubu Cartoon Actions
+const DUDU_ACTIONS = [
+  { cls: 'action-bonk', label: '🐻 Bonk!', fx: '💥' },
+  { cls: 'action-hug', label: '🫂 Hug!', fx: '💖' },
+  { cls: 'action-chase', label: '🏃 Chase!', fx: '💨' },
+  { cls: 'action-dance', label: '💃 Dance!', fx: '✨' }
+];
+let duduActionIndex = 0;
+let duduAutoCycleInterval = null;
+
+// ================= WEBRTC STATE =================
+
 let peerConnection = null;
 let localStream = null;
 let currentCallPartner = null;
@@ -58,7 +133,9 @@ const rtcConfig = {
   ]
 };
 
-// DOM Elements - Romantic Stage, Kittens, Typing Pill, Toast & Confirm Modal
+// ================= DOM ELEMENTS =================
+
+// Romantic Stage, Kittens, Typing Pill, Toast & Confirm Modal
 const heartShowerStage = document.getElementById('heart-shower-stage');
 const cuteKittensStage = document.getElementById('cute-kittens-stage');
 const liveTypingPill = document.getElementById('live-typing-pill');
@@ -70,26 +147,80 @@ const confirmMessage = document.getElementById('confirm-message');
 const confirmCancelBtn = document.getElementById('confirm-cancel-btn');
 const confirmOkBtn = document.getElementById('confirm-ok-btn');
 
-// DOM Elements - Game Mode & Watch Together
+// Game Mode Shell & Dudu-Bubu
 const openGameModeBtn = document.getElementById('open-game-mode-btn');
 const gameModeModal = document.getElementById('game-mode-modal');
 const closeGameModeBtn = document.getElementById('close-game-mode-btn');
+const stopGameAudioBtn = document.getElementById('stop-game-audio-btn');
 const gameTabs = document.querySelectorAll('.game-tab');
+const duduBubuStage = document.getElementById('dudu-bubu-stage');
+const duduBubuFx = document.getElementById('dudu-bubu-fx');
+const duduActionBtn = document.getElementById('dudu-action-btn');
+
+// Game 1: Tic-Tac-Toe
+const tttScoreMeLabel = document.getElementById('ttt-score-me-label');
+const tttScoreMeEl = document.getElementById('ttt-score-me');
+const tttScorePartnerLabel = document.getElementById('ttt-score-partner-label');
+const tttScorePartnerEl = document.getElementById('ttt-score-partner');
+const tttEmojiButtons = document.querySelectorAll('.emoji-choice-btn');
 const tttRoleHint = document.getElementById('ttt-role-hint');
 const tttStatusEl = document.getElementById('ttt-status');
 const tttBoardEl = document.getElementById('ttt-board');
+const tttDareCard = document.getElementById('ttt-dare-card');
+const tttDareText = document.getElementById('ttt-dare-text');
 const tttResetBtn = document.getElementById('ttt-reset-btn');
-const wyrQuestionEl = document.getElementById('wyr-question');
-const wyrOptA = document.getElementById('wyr-opt-a');
-const wyrOptB = document.getElementById('wyr-opt-b');
-const wyrPicksInfo = document.getElementById('wyr-picks-info');
-const wyrNextBtn = document.getElementById('wyr-next-btn');
+const tttResetScoresBtn = document.getElementById('ttt-reset-scores-btn');
+
+// Game 2: Mind Sync
+const mindStreakBadge = document.getElementById('mind-streak-badge');
+const mindPromptText = document.getElementById('mind-prompt-text');
+const mindForm = document.getElementById('mind-form');
+const mindAnswerInput = document.getElementById('mind-answer-input');
+const mindLockBtn = document.getElementById('mind-lock-btn');
+const mindStatusText = document.getElementById('mind-status-text');
+const mindRevealArea = document.getElementById('mind-reveal-area');
+const mindCustomPromptInput = document.getElementById('mind-custom-prompt-input');
+const mindCustomSendBtn = document.getElementById('mind-custom-send-btn');
+const mindNextBtn = document.getElementById('mind-next-btn');
+
+// Game 3: Emoji RPS
+const rpsMeLabel = document.getElementById('rps-me-label');
+const rpsScoreMeEl = document.getElementById('rps-score-me');
+const rpsRoundLabel = document.getElementById('rps-round-label');
+const rpsPartnerLabel = document.getElementById('rps-partner-label');
+const rpsScorePartnerEl = document.getElementById('rps-score-partner');
+const rpsArenaMe = document.getElementById('rps-arena-me');
+const rpsArenaPartner = document.getElementById('rps-arena-partner');
+const rpsPartnerNameEl = document.getElementById('rps-partner-name');
+const rpsResultBanner = document.getElementById('rps-result-banner');
+const rpsMoveButtons = document.querySelectorAll('.rps-move-btn');
+const rpsResetBtn = document.getElementById('rps-reset-btn');
+
+// Game 4: Heart Catch Battle
+const catchScoreMeEl = document.getElementById('catch-score-me');
+const catchTimerEl = document.getElementById('catch-timer');
+const catchPartnerLabel = document.getElementById('catch-partner-label');
+const catchScorePartnerEl = document.getElementById('catch-score-partner');
+const catchArena = document.getElementById('catch-arena');
+const catchOverlay = document.getElementById('catch-overlay');
+const catchStatusMsg = document.getElementById('catch-status-msg');
+const catchStartBtn = document.getElementById('catch-start-btn');
+
+// Game 5: Watch Together + Live Reactions
 const ytLoadForm = document.getElementById('yt-load-form');
 const ytUrlInput = document.getElementById('yt-url-input');
 const ytEmptyMsg = document.getElementById('yt-empty-msg');
 const ytIframe = document.getElementById('yt-iframe');
+const watchReactionStage = document.getElementById('watch-reaction-stage');
+const watchReactButtons = document.querySelectorAll('.watch-react-btn');
 
-// DOM Elements - Auth
+// Game 6: Shared Live Doodle Canvas
+const doodleCanvas = document.getElementById('doodle-canvas');
+const doodleColorButtons = document.querySelectorAll('.doodle-color-btn');
+const doodleSizeInput = document.getElementById('doodle-size');
+const doodleClearBtn = document.getElementById('doodle-clear-btn');
+
+// Auth Elements
 const authContainer = document.getElementById('auth-container');
 const chatContainer = document.getElementById('chat-container');
 const authTabsBox = document.getElementById('auth-tabs-box');
@@ -111,7 +242,7 @@ const deleteAccountLinkBtn = document.getElementById('delete-account-link-btn');
 const backToLoginBtn = document.getElementById('back-to-login-btn');
 const authFeedback = document.getElementById('auth-feedback');
 
-// DOM Elements - Sidebar & Header
+// Sidebar & Chat Header
 const sidebar = document.getElementById('sidebar');
 const sidebarBackdrop = document.getElementById('sidebar-backdrop');
 const toggleSidebarBtn = document.getElementById('toggle-sidebar-btn');
@@ -150,12 +281,25 @@ const heartShowerBtn = document.getElementById('heart-shower-btn');
 const messageInput = document.getElementById('message-input');
 const sendBtn = document.getElementById('send-btn');
 
-// DOM Elements - Settings Modal
+// Settings Modal Elements
 const settingsModal = document.getElementById('settings-modal');
 const closeSettingsBtn = document.getElementById('close-settings-btn');
 const toggleSoundCheckbox = document.getElementById('toggle-sound');
 const toggleVibrateCheckbox = document.getElementById('toggle-vibrate');
 const toggleAutologinCheckbox = document.getElementById('toggle-autologin');
+const gameAudioFeedback = document.getElementById('game-audio-feedback');
+const winSongStatus = document.getElementById('win-song-status');
+const winSongFileInput = document.getElementById('win-song-file');
+const winSongStartInput = document.getElementById('win-song-start');
+const uploadWinSongBtn = document.getElementById('upload-win-song-btn');
+const testWinSongBtn = document.getElementById('test-win-song-btn');
+const clearWinSongBtn = document.getElementById('clear-win-song-btn');
+const loseSongStatus = document.getElementById('lose-song-status');
+const loseSongFileInput = document.getElementById('lose-song-file');
+const loseSongStartInput = document.getElementById('lose-song-start');
+const uploadLoseSongBtn = document.getElementById('upload-lose-song-btn');
+const testLoseSongBtn = document.getElementById('test-lose-song-btn');
+const clearLoseSongBtn = document.getElementById('clear-lose-song-btn');
 const enablePushBtn = document.getElementById('enable-push-btn');
 const pushStatusDesc = document.getElementById('push-status-desc');
 const clearChatBtn = document.getElementById('clear-chat-btn');
@@ -170,7 +314,7 @@ const cpNew = document.getElementById('cp-new');
 const cpPin = document.getElementById('cp-pin');
 const cpFeedback = document.getElementById('cp-feedback');
 
-// DOM Elements - Calling
+// Calling Elements
 const incomingOverlay = document.getElementById('incoming-call-overlay');
 const incomingCallerAvatar = document.getElementById('incoming-caller-avatar');
 const incomingCallerName = document.getElementById('incoming-caller-name');
@@ -206,6 +350,15 @@ toggleSoundCheckbox.checked = userSettings.soundEnabled;
 toggleVibrateCheckbox.checked = userSettings.vibrateEnabled;
 toggleAutologinCheckbox.checked = userSettings.autoLogin;
 
+// Unlock Web Audio on first user touch/click (required on mobile browsers)
+['click', 'touchstart'].forEach(evt => {
+  window.addEventListener(evt, () => {
+    if (audioCtx && audioCtx.state === 'suspended') {
+      audioCtx.resume().catch(() => {});
+    }
+  }, { passive: true });
+});
+
 // ================= MOBILE KEYBOARD VIEWPORT SYNC =================
 
 function syncMobileViewportHeight() {
@@ -226,52 +379,393 @@ if (window.visualViewport) {
   window.visualViewport.addEventListener('resize', syncMobileViewportHeight);
   window.visualViewport.addEventListener('scroll', syncMobileViewportHeight);
 }
-window.addEventListener('resize', syncMobileViewportHeight);
+window.addEventListener('resize', () => {
+  syncMobileViewportHeight();
+  resizeDoodleCanvas();
+});
 
 window.addEventListener('DOMContentLoaded', () => {
   syncMobileViewportHeight();
   initRomanticBackgroundCanvas();
   initGameModeCanvas();
+  initDoodleCanvas();
+  applyDuduAction(0);
+  renderGameAudioSettings();
   renderTicTacToe();
-  renderWouldYouRather();
+  renderMindSync();
+  renderRps();
+  renderCatchGame();
+
   const savedUser = localStorage.getItem('ps_username');
-  if (userSettings.autoLogin && savedUser) {
-    enterApp(savedUser, currentAuthToken);
+  const savedToken = localStorage.getItem('ps_token');
+  if (userSettings.autoLogin && savedUser && savedToken) {
+    enterApp(savedUser, savedToken);
   }
 });
 
-// ================= WIN SOUND EFFECT =================
+// ================= SHARED CUSTOM GAME SONGS & FALLBACK SOUNDS =================
 
-function playWinSound() {
+function showGameAudioFeedback(msg, type = 'success') {
+  if (!gameAudioFeedback) return;
+  gameAudioFeedback.textContent = msg;
+  gameAudioFeedback.className = `auth-feedback ${type}`;
+  gameAudioFeedback.style.display = 'block';
+}
+
+function renderGameAudioSettings() {
+  if (winSongStatus) {
+    if (gameAudioMeta.win) {
+      winSongStatus.textContent = `🎵 ${gameAudioMeta.win.name} (from ${gameAudioMeta.win.startSec || 0}s • set by ${gameAudioMeta.win.setBy})`;
+      if (winSongStartInput && !winSongStartInput.matches(':focus')) {
+        winSongStartInput.value = gameAudioMeta.win.startSec || 0;
+      }
+    } else {
+      winSongStatus.textContent = 'Default victory fanfare';
+    }
+  }
+
+  if (loseSongStatus) {
+    if (gameAudioMeta.lose) {
+      loseSongStatus.textContent = `🎵 ${gameAudioMeta.lose.name} (from ${gameAudioMeta.lose.startSec || 0}s • set by ${gameAudioMeta.lose.setBy})`;
+      if (loseSongStartInput && !loseSongStartInput.matches(':focus')) {
+        loseSongStartInput.value = gameAudioMeta.lose.startSec || 0;
+      }
+    } else if (gameAudioMeta.win) {
+      loseSongStatus.textContent = `Shared Win Song will play (${gameAudioMeta.win.name})`;
+    } else {
+      loseSongStatus.textContent = 'Default funny sad trombone';
+    }
+  }
+}
+
+function stopGameSong() {
+  clearTimeout(gameSongStopTimer);
+  gameSongStopTimer = null;
+  try {
+    gameSongPlayer.pause();
+    gameSongPlayer.currentTime = 0;
+  } catch (e) {}
+  if (previewObjectUrl) {
+    URL.revokeObjectURL(previewObjectUrl);
+    previewObjectUrl = null;
+  }
+  if (stopGameAudioBtn) {
+    stopGameAudioBtn.style.display = 'none';
+  }
+}
+
+gameSongPlayer.addEventListener('ended', stopGameSong);
+
+if (stopGameAudioBtn) {
+  stopGameAudioBtn.addEventListener('click', stopGameSong);
+}
+
+function startAudioElementFromSec(srcUrl, startSec = 0) {
+  stopGameSong();
+  const safeStart = Math.max(0, Number(startSec) || 0);
+
+  gameSongPlayer.src = srcUrl;
+  gameSongPlayer.volume = 0.9;
+
+  const beginPlayback = () => {
+    try {
+      if (safeStart > 0 && (!isFinite(gameSongPlayer.duration) || safeStart < gameSongPlayer.duration)) {
+        gameSongPlayer.currentTime = safeStart;
+      }
+    } catch (e) {}
+
+    const playPromise = gameSongPlayer.play();
+    if (playPromise && typeof playPromise.then === 'function') {
+      playPromise
+        .then(() => {
+          if (stopGameAudioBtn) stopGameAudioBtn.style.display = 'inline-block';
+          // Auto-stop after 12 seconds so it feels like a crisp game celebration clip
+          gameSongStopTimer = setTimeout(stopGameSong, 12000);
+        })
+        .catch(() => {
+          showToast('Tap anywhere once to allow game song playback.', 'info');
+        });
+    }
+  };
+
+  gameSongPlayer.onloadedmetadata = () => {
+    gameSongPlayer.onloadedmetadata = null;
+    beginPlayback();
+  };
+  gameSongPlayer.load();
+}
+
+function playSyncedGameSong(type) {
+  const meta = gameAudioMeta[type];
+  if (!meta || !currentUser || !currentAuthToken) return false;
+  const streamUrl = `/game-audio/${type}?u=${encodeURIComponent(currentUser)}&t=${encodeURIComponent(currentAuthToken)}&v=${meta.updatedAt || 0}`;
+  startAudioElementFromSec(streamUrl, meta.startSec || 0);
+  return true;
+}
+
+async function handleSaveGameSong(type) {
+  const fileInput = type === 'win' ? winSongFileInput : loseSongFileInput;
+  const startInput = type === 'win' ? winSongStartInput : loseSongStartInput;
+  const saveBtn = type === 'win' ? uploadWinSongBtn : uploadLoseSongBtn;
+
+  if (!currentUser || !currentAuthToken) return;
+  if (gameAudioFeedback) gameAudioFeedback.style.display = 'none';
+
+  const startSec = Math.max(0, Math.min(3600, Number(startInput?.value) || 0));
+  const file = fileInput?.files?.[0];
+
+  // If no new file chosen, update only startSec for the already-uploaded song
+  if (!file) {
+    if (!gameAudioMeta[type]) {
+      showGameAudioFeedback('Please select an MP3 or audio file first.', 'error');
+      return;
+    }
+    try {
+      if (saveBtn) saveBtn.disabled = true;
+      const res = await fetch(`/game-audio-meta/${type}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-auth-token': currentAuthToken
+        },
+        body: JSON.stringify({ username: currentUser, token: currentAuthToken, startSec })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showGameAudioFeedback(data.error || 'Could not update start time.', 'error');
+        return;
+      }
+      if (data.audio) gameAudioMeta = data.audio;
+      renderGameAudioSettings();
+      showGameAudioFeedback('Start time updated for both players!', 'success');
+    } catch (err) {
+      showGameAudioFeedback('Network error updating start time.', 'error');
+    } finally {
+      if (saveBtn) saveBtn.disabled = false;
+    }
+    return;
+  }
+
+  if (file.size > 5 * 1024 * 1024) {
+    showGameAudioFeedback('File is too big! Please pick an audio clip under 5 MB.', 'error');
+    return;
+  }
+
+  try {
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.textContent = '...';
+    }
+    const res = await fetch(`/game-audio/${type}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': file.type || 'audio/mpeg',
+        'x-auth-user': encodeURIComponent(currentUser),
+        'x-auth-token': currentAuthToken,
+        'x-audio-name': encodeURIComponent(file.name),
+        'x-audio-start': String(startSec)
+      },
+      body: file
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showGameAudioFeedback(data.error || 'Failed to upload song.', 'error');
+      return;
+    }
+    if (data.audio) gameAudioMeta = data.audio;
+    fileInput.value = '';
+    renderGameAudioSettings();
+    showGameAudioFeedback(`${type === 'win' ? 'Win' : 'Lose'} Song saved! Both players will hear it.`, 'success');
+  } catch (err) {
+    showGameAudioFeedback('Upload error. Try a smaller MP3 file.', 'error');
+  } finally {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save';
+    }
+  }
+}
+
+function handlePreviewGameSong(type) {
+  const fileInput = type === 'win' ? winSongFileInput : loseSongFileInput;
+  const startInput = type === 'win' ? winSongStartInput : loseSongStartInput;
+  const localFile = fileInput?.files?.[0];
+  const startSec = Math.max(0, Number(startInput?.value) || 0);
+
+  if (localFile) {
+    stopGameSong();
+    previewObjectUrl = URL.createObjectURL(localFile);
+    startAudioElementFromSec(previewObjectUrl, startSec);
+    return;
+  }
+
+  if (gameAudioMeta[type]) {
+    playSyncedGameSong(type);
+    return;
+  }
+
+  if (type === 'win') {
+    playRetroWinFanfare();
+  } else {
+    playFunnySadTrombone();
+  }
+}
+
+async function handleClearGameSong(type) {
+  if (!currentUser || !currentAuthToken) return;
+  stopGameSong();
+  const fileInput = type === 'win' ? winSongFileInput : loseSongFileInput;
+  if (fileInput) fileInput.value = '';
+
+  if (!gameAudioMeta[type]) {
+    showGameAudioFeedback('Already using default sound.', 'success');
+    return;
+  }
+
+  try {
+    const res = await fetch(`/game-audio/${type}`, {
+      method: 'DELETE',
+      headers: {
+        'x-auth-user': encodeURIComponent(currentUser),
+        'x-auth-token': currentAuthToken
+      }
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showGameAudioFeedback(data.error || 'Could not remove song.', 'error');
+      return;
+    }
+    if (data.audio) gameAudioMeta = data.audio;
+    renderGameAudioSettings();
+    showGameAudioFeedback('Song removed. Reverted to default sound.', 'success');
+  } catch (err) {
+    showGameAudioFeedback('Network error removing song.', 'error');
+  }
+}
+
+if (uploadWinSongBtn) uploadWinSongBtn.addEventListener('click', () => handleSaveGameSong('win'));
+if (testWinSongBtn) testWinSongBtn.addEventListener('click', () => handlePreviewGameSong('win'));
+if (clearWinSongBtn) clearWinSongBtn.addEventListener('click', () => handleClearGameSong('win'));
+
+if (uploadLoseSongBtn) uploadLoseSongBtn.addEventListener('click', () => handleSaveGameSong('lose'));
+if (testLoseSongBtn) testLoseSongBtn.addEventListener('click', () => handlePreviewGameSong('lose'));
+if (clearLoseSongBtn) clearLoseSongBtn.addEventListener('click', () => handleClearGameSong('lose'));
+
+function playRetroWinFanfare() {
   try {
     const ctx = getAudioContext();
     if (!ctx) return;
-    const notes = [523.25, 659.25, 783.99, 1046.5];
+    const notes = [523.25, 659.25, 783.99, 1046.5, 1318.5];
     notes.forEach((freq, idx) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = 'triangle';
-      const startAt = ctx.currentTime + idx * 0.11;
+      const startAt = ctx.currentTime + idx * 0.09;
       osc.frequency.setValueAtTime(freq, startAt);
       gain.gain.setValueAtTime(0.18, startAt);
-      gain.gain.exponentialRampToValueAtTime(0.001, startAt + 0.28);
+      gain.gain.exponentialRampToValueAtTime(0.001, startAt + 0.25);
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.start(startAt);
-      osc.stop(startAt + 0.3);
+      osc.stop(startAt + 0.26);
     });
   } catch (e) {}
 }
 
-// ================= GAME MODE, STRICT TURN TIC-TAC-TOE & WATCH TOGETHER =================
-
-function getMyTTTSymbol() {
-  if (!currentUser || !activeFriend) return '❤️';
-  return currentUser.toLowerCase() < activeFriend.toLowerCase() ? '❤️' : '✨';
+function playFunnySadTrombone() {
+  try {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    const notes = [
+      { freq: 311.13, dur: 0.24, delay: 0.0 },
+      { freq: 293.66, dur: 0.24, delay: 0.25 },
+      { freq: 277.18, dur: 0.24, delay: 0.5 },
+      { freq: 261.63, dur: 0.58, delay: 0.75, slideTo: 233.08 }
+    ];
+    notes.forEach((n) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sawtooth';
+      const startAt = ctx.currentTime + n.delay;
+      osc.frequency.setValueAtTime(n.freq, startAt);
+      if (n.slideTo) {
+        osc.frequency.exponentialRampToValueAtTime(n.slideTo, startAt + n.dur);
+      }
+      gain.gain.setValueAtTime(0.12, startAt);
+      gain.gain.exponentialRampToValueAtTime(0.001, startAt + n.dur);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(startAt);
+      osc.stop(startAt + n.dur + 0.02);
+    });
+  } catch (e) {}
 }
 
-function getPartnerTTTSymbol() {
-  return getMyTTTSymbol() === '❤️' ? '✨' : '❤️';
+function triggerGameOutcomeSound(didWin) {
+  if (didWin) {
+    spawnHeartShower(18);
+    applyDuduAction(3); // Happy Dance!
+    if (!playSyncedGameSong('win')) {
+      playRetroWinFanfare();
+    }
+  } else {
+    applyDuduAction(0); // Playful Bonk!
+    // If Lose Song is set, play Lose Song; else if Win Song is set, play Win Song so both hear it; else sad trombone
+    if (!playSyncedGameSong('lose')) {
+      if (!playSyncedGameSong('win')) {
+        playFunnySadTrombone();
+      }
+    }
+  }
+}
+
+// ================= DUDU-BUBU BACKGROUND ACTION CONTROLLER =================
+
+function applyDuduAction(index) {
+  if (!duduBubuStage) return;
+  duduActionIndex = index % DUDU_ACTIONS.length;
+  const act = DUDU_ACTIONS[duduActionIndex];
+  duduBubuStage.className = `dudu-bubu-stage ${act.cls}`;
+  if (duduBubuFx) duduBubuFx.textContent = act.fx;
+  if (duduActionBtn) duduActionBtn.textContent = act.label;
+}
+
+if (duduActionBtn) {
+  duduActionBtn.addEventListener('click', () => {
+    applyDuduAction(duduActionIndex + 1);
+  });
+}
+
+function startDuduAutoCycle() {
+  stopDuduAutoCycle();
+  duduAutoCycleInterval = setInterval(() => {
+    if (isGameModeOpen() && !document.hidden) {
+      applyDuduAction(duduActionIndex + 1);
+    }
+  }, 9000);
+}
+
+function stopDuduAutoCycle() {
+  if (duduAutoCycleInterval) {
+    clearInterval(duduAutoCycleInterval);
+    duduAutoCycleInterval = null;
+  }
+}
+
+// ================= GAME MODE SHELL & TAB NAVIGATION =================
+
+function isGameModeOpen() {
+  return Boolean(gameModeModal && gameModeModal.style.display !== 'none');
+}
+
+function pauseYouTubeIframe() {
+  if (!ytIframe || !ytIframe.contentWindow || !ytVideoId) return;
+  try {
+    ytIframe.contentWindow.postMessage(
+      JSON.stringify({ event: 'command', func: 'pauseVideo', args: '' }),
+      '*'
+    );
+  } catch (e) {}
 }
 
 if (openGameModeBtn) {
@@ -281,13 +775,20 @@ if (openGameModeBtn) {
       return;
     }
     renderTicTacToe();
-    renderWouldYouRather();
+    renderMindSync();
+    renderRps();
+    renderCatchGame();
     gameModeModal.style.display = 'flex';
+    startDuduAutoCycle();
+    setTimeout(resizeDoodleCanvas, 60);
   });
 }
 
 if (closeGameModeBtn) {
   closeGameModeBtn.addEventListener('click', () => {
+    pauseYouTubeIframe();
+    stopGameSong();
+    stopDuduAutoCycle();
     gameModeModal.style.display = 'none';
   });
 }
@@ -297,11 +798,17 @@ gameTabs.forEach(tab => {
     gameTabs.forEach(t => t.classList.remove('active'));
     tab.classList.add('active');
     const target = tab.dataset.gtab;
+    if (target !== 'watch') pauseYouTubeIframe();
     document.querySelectorAll('.game-panel').forEach(p => p.classList.remove('active'));
     const panel = document.getElementById(`gtab-${target}`);
     if (panel) panel.classList.add('active');
+    if (target === 'doodle') {
+      setTimeout(resizeDoodleCanvas, 40);
+    }
   });
 });
+
+// ================= GAME 1: UPGRADED TIC-TAC-TOE =================
 
 function getWinningLine(board) {
   const lines = [
@@ -318,58 +825,90 @@ function getWinningLine(board) {
   return { winner: null, line: [] };
 }
 
+function getTTTPlayerSymbols() {
+  const me = (currentUser || '').toLowerCase();
+  const partner = (activeFriend || '').toLowerCase();
+  const defaultFirst = me && partner ? (me < partner ? '❤️' : '✨') : '❤️';
+  const defaultSecond = defaultFirst === '❤️' ? '✨' : '❤️';
+  const mySymbol = tttState.symbols?.[me] || defaultFirst;
+  const partnerSymbol = tttState.symbols?.[partner] || defaultSecond;
+  return { me, partner, mySymbol, partnerSymbol };
+}
+
+tttEmojiButtons.forEach(btn => {
+  btn.addEventListener('click', () => {
+    const symbol = btn.dataset.emoji;
+    if (!symbol || !activeFriend || !socket) return;
+    socket.emit('ttt-set-symbol', { to: activeFriend, symbol });
+  });
+});
+
 function renderTicTacToe() {
   if (!tttBoardEl || !tttStatusEl) return;
-  tttBoardEl.innerHTML = '';
+  const { me, partner, mySymbol, partnerSymbol } = getTTTPlayerSymbols();
+  const scores = tttState.scores || {};
 
-  const mySymbol = getMyTTTSymbol();
-  const partnerSymbol = getPartnerTTTSymbol();
-  const isMyTurn = !tttWinner && !tttDraw && tttTurn === mySymbol;
+  if (tttScoreMeLabel) tttScoreMeLabel.textContent = `You (${mySymbol})`;
+  if (tttScorePartnerLabel) tttScorePartnerLabel.textContent = `${activeFriend || 'Partner'} (${partnerSymbol})`;
+  if (tttScoreMeEl) tttScoreMeEl.textContent = String(scores[me] || 0);
+  if (tttScorePartnerEl) tttScorePartnerEl.textContent = String(scores[partner] || 0);
 
-  if (tttRoleHint && activeFriend) {
-    tttRoleHint.textContent = `You: ${mySymbol} • ${activeFriend}: ${partnerSymbol}`;
+  tttEmojiButtons.forEach(btn => {
+    const e = btn.dataset.emoji;
+    btn.classList.toggle('active', e === mySymbol);
+    btn.classList.toggle('taken', e === partnerSymbol);
+    btn.disabled = e === partnerSymbol;
+  });
+
+  const turnUser = tttState.turnUser || (me < partner ? me : partner);
+  const isMyTurn = !tttState.winnerUser && !tttState.isDraw && turnUser === me;
+  const turnSym = turnUser === me ? mySymbol : partnerSymbol;
+
+  if (tttRoleHint) {
+    tttRoleHint.textContent = `You: ${mySymbol} • ${activeFriend || 'Partner'}: ${partnerSymbol}`;
   }
 
-  if (tttWinner) {
-    const wonByMe = tttWinner === mySymbol;
+  if (tttState.winnerUser) {
+    const wonByMe = tttState.winnerUser === me;
     tttStatusEl.textContent = wonByMe
-      ? `You (${mySymbol}) won the round!`
-      : `${activeFriend || 'Partner'} (${tttWinner}) won the round`;
-    const winKey = `${tttWinner}-${tttBoard.join('')}`;
-    if (wonByMe && lastAnnouncedWinKey !== winKey) {
-      lastAnnouncedWinKey = winKey;
-      playWinSound();
+      ? `🎉 You (${mySymbol}) won the round!`
+      : `😜 ${activeFriend || 'Partner'} (${partnerSymbol}) won!`;
+
+    if (tttDareCard && tttDareText && tttState.lastDare) {
+      tttDareText.textContent = tttState.lastDare;
+      tttDareCard.style.display = 'block';
     }
-  } else if (tttDraw) {
-    tttStatusEl.textContent = 'Draw game — tap Restart Match';
+
+    const winKey = `${tttState.winnerUser}-${(tttState.board || []).join('')}-${scores[tttState.winnerUser] || 0}`;
+    if (lastAnnouncedTttWinKey !== winKey) {
+      lastAnnouncedTttWinKey = winKey;
+      triggerGameOutcomeSound(wonByMe);
+    }
+  } else if (tttState.isDraw) {
+    tttStatusEl.textContent = '🤝 Draw match — tap New Round!';
+    if (tttDareCard) tttDareCard.style.display = 'none';
   } else {
     tttStatusEl.textContent = isMyTurn
       ? `Your turn (${mySymbol})`
-      : `Waiting for ${activeFriend || 'partner'} (${tttTurn})...`;
+      : `Waiting for ${activeFriend || 'partner'} (${turnSym})...`;
+    if (tttDareCard) tttDareCard.style.display = 'none';
   }
 
-  tttBoard.forEach((cell, idx) => {
+  tttBoardEl.innerHTML = '';
+  const board = Array.isArray(tttState.board) ? tttState.board : Array(9).fill(null);
+  board.forEach((cell, idx) => {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'ttt-cell';
     if (tttWinLine.includes(idx)) btn.classList.add('win-cell');
     btn.textContent = cell || '';
-    btn.disabled = Boolean(cell || tttWinner || tttDraw || !isMyTurn);
+    btn.disabled = Boolean(cell || tttState.winnerUser || tttState.isDraw || !isMyTurn || tttMovePending);
 
     btn.addEventListener('click', () => {
-      if (cell || tttWinner || tttDraw || !isMyTurn || !activeFriend || !socket) return;
-      const nextBoard = tttBoard.slice();
-      nextBoard[idx] = mySymbol;
-      const outcome = getWinningLine(nextBoard);
-      const draw = !outcome.winner && nextBoard.every(Boolean);
-      const nextTurn = mySymbol === '❤️' ? '✨' : '❤️';
-      socket.emit('ttt-move', {
-        to: activeFriend,
-        board: nextBoard,
-        turn: nextTurn,
-        winner: outcome.winner,
-        isDraw: draw
-      });
+      if (cell || tttState.winnerUser || tttState.isDraw || !isMyTurn || tttMovePending || !activeFriend || !socket) return;
+      tttMovePending = true;
+      socket.emit('ttt-move', { to: activeFriend, index: idx });
+      setTimeout(() => { tttMovePending = false; }, 600);
     });
     tttBoardEl.appendChild(btn);
   });
@@ -378,54 +917,307 @@ function renderTicTacToe() {
 if (tttResetBtn) {
   tttResetBtn.addEventListener('click', () => {
     if (!activeFriend || !socket) return;
-    socket.emit('ttt-reset', { to: activeFriend });
+    stopGameSong();
+    socket.emit('ttt-reset', { to: activeFriend, resetScores: false });
   });
 }
 
-function renderWouldYouRather() {
-  if (!wyrQuestionEl || !wyrOptA || !wyrOptB || !wyrPicksInfo) return;
-  const item = wyrQuestions[wyrRoundIndex % wyrQuestions.length];
-  wyrQuestionEl.textContent = item.q;
-  wyrOptA.textContent = `A: ${item.a}`;
-  wyrOptB.textContent = `B: ${item.b}`;
+if (tttResetScoresBtn) {
+  tttResetScoresBtn.addEventListener('click', () => {
+    if (!activeFriend || !socket) return;
+    stopGameSong();
+    socket.emit('ttt-reset', { to: activeFriend, resetScores: true });
+  });
+}
 
-  const myKey = (currentUser || '').toLowerCase();
-  const myPick = wyrPicks[myKey];
-  wyrOptA.classList.toggle('picked', myPick === 'A');
-  wyrOptB.classList.toggle('picked', myPick === 'B');
+// ================= GAME 2: MIND SYNC (TELEPATHY TEST) =================
 
-  const entries = Object.entries(wyrPicks);
-  if (entries.length === 0) {
-    wyrPicksInfo.textContent = 'No picks yet';
-  } else if (entries.length === 1) {
-    const who = entries[0][0] === myKey ? 'You' : entries[0][0];
-    wyrPicksInfo.textContent = `${who} picked ${entries[0][1]} • Waiting for partner...`;
+function renderMindSync() {
+  if (!mindPromptText || !mindStatusText || !mindRevealArea) return;
+  const me = (currentUser || '').toLowerCase();
+  const partner = (activeFriend || '').toLowerCase();
+
+  const promptStr = mindState.customPrompt || mindPrompts[mindState.promptIndex % mindPrompts.length];
+  mindPromptText.textContent = promptStr;
+  if (mindStreakBadge) {
+    mindStreakBadge.textContent = `🔥 Telepathy Streak: ${mindState.streak || 0}`;
+  }
+
+  const myAns = mindState.answers?.[me];
+  const partnerAns = mindState.answers?.[partner];
+
+  if (mindAnswerInput) {
+    mindAnswerInput.disabled = Boolean(myAns || mindState.revealed);
+  }
+  if (mindLockBtn) {
+    mindLockBtn.disabled = Boolean(myAns || mindState.revealed);
+    mindLockBtn.textContent = myAns ? 'Locked ✓' : 'Lock 🔒';
+  }
+
+  mindRevealArea.innerHTML = '';
+
+  if (mindState.revealed) {
+    const myCard = document.createElement('div');
+    myCard.className = `mind-reveal-card ${mindState.matched ? 'matched' : ''}`;
+    myCard.innerHTML = `<small>You wrote</small><strong>${escapeHTML(myAns?.text || '—')}</strong>`;
+
+    const partnerCard = document.createElement('div');
+    partnerCard.className = `mind-reveal-card ${mindState.matched ? 'matched' : ''}`;
+    partnerCard.innerHTML = `<small>${escapeHTML(activeFriend || 'Partner')} wrote</small><strong>${escapeHTML(partnerAns?.text || '—')}</strong>`;
+
+    mindRevealArea.appendChild(myCard);
+    mindRevealArea.appendChild(partnerCard);
+
+    mindStatusText.textContent = mindState.matched
+      ? '💖 SOULMATE SYNC! Same vibe unlocked!'
+      : '😂 Different answers — debate time!';
+
+    const revealKey = `${mindState.promptIndex}-${mindState.customPrompt || ''}-${myAns?.text}-${partnerAns?.text}`;
+    if (lastAnnouncedMindKey !== revealKey) {
+      lastAnnouncedMindKey = revealKey;
+      triggerGameOutcomeSound(Boolean(mindState.matched));
+    }
+  } else if (myAns && !partnerAns) {
+    mindStatusText.textContent = `Your answer is locked 🔒 — waiting for ${activeFriend || 'partner'}...`;
+  } else if (!myAns && partnerAns) {
+    mindStatusText.textContent = `${activeFriend || 'Partner'} locked an answer! Your turn 👇`;
   } else {
-    const same = entries[0][1] === entries[1][1];
-    wyrPicksInfo.textContent = same
-      ? `Both matched on Option ${entries[0][1]}!`
-      : `${entries[0][0]} picked ${entries[0][1]} • ${entries[1][0]} picked ${entries[1][1]}`;
+    mindStatusText.textContent = 'Type your secret answer and lock it in!';
   }
 }
 
-function sendWyrPick(choice) {
-  if (!activeFriend || !socket) return;
-  socket.emit('wyr-pick', {
-    to: activeFriend,
-    roundIndex: wyrRoundIndex,
-    choice
+if (mindForm) {
+  mindForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (!activeFriend || !socket) return;
+    const text = (mindAnswerInput?.value || '').trim();
+    if (!text) return;
+    socket.emit('mind-submit', { to: activeFriend, text });
+    mindAnswerInput.value = '';
   });
 }
 
-if (wyrOptA) wyrOptA.addEventListener('click', () => sendWyrPick('A'));
-if (wyrOptB) wyrOptB.addEventListener('click', () => sendWyrPick('B'));
-if (wyrNextBtn) {
-  wyrNextBtn.addEventListener('click', () => {
+if (mindCustomSendBtn) {
+  mindCustomSendBtn.addEventListener('click', () => {
     if (!activeFriend || !socket) return;
-    const nextIdx = (wyrRoundIndex + 1) % wyrQuestions.length;
-    socket.emit('wyr-next', { to: activeFriend, roundIndex: nextIdx });
+    const custom = (mindCustomPromptInput?.value || '').trim();
+    if (!custom) return;
+    stopGameSong();
+    socket.emit('mind-next', { to: activeFriend, customPrompt: custom });
+    mindCustomPromptInput.value = '';
   });
 }
+
+if (mindNextBtn) {
+  mindNextBtn.addEventListener('click', () => {
+    if (!activeFriend || !socket) return;
+    stopGameSong();
+    const nextIdx = (mindState.promptIndex + 1) % mindPrompts.length;
+    socket.emit('mind-next', { to: activeFriend, promptIndex: nextIdx });
+  });
+}
+
+// ================= GAME 3: EMOJI ROCK-PAPER-SCISSORS (BEST OF 5) =================
+
+function renderRps() {
+  if (!rpsResultBanner || !rpsArenaMe || !rpsArenaPartner) return;
+  const me = (currentUser || '').toLowerCase();
+  const partner = (activeFriend || '').toLowerCase();
+  const scores = rpsState.scores || {};
+
+  if (rpsMeLabel) rpsMeLabel.textContent = 'You';
+  if (rpsPartnerLabel) rpsPartnerLabel.textContent = activeFriend || 'Partner';
+  if (rpsPartnerNameEl) rpsPartnerNameEl.textContent = activeFriend || 'Partner';
+  if (rpsScoreMeEl) rpsScoreMeEl.textContent = String(scores[me] || 0);
+  if (rpsScorePartnerEl) rpsScorePartnerEl.textContent = String(scores[partner] || 0);
+  if (rpsRoundLabel) rpsRoundLabel.textContent = `Round ${rpsState.round || 1}`;
+
+  const locked = Array.isArray(rpsState.lockedUsers) ? rpsState.lockedUsers : [];
+  const iLocked = Boolean(rpsState.myPick);
+  const partnerLocked = locked.includes(partner);
+
+  rpsMoveButtons.forEach(btn => {
+    const move = btn.dataset.move;
+    btn.classList.toggle('selected', rpsState.myPick === move);
+    btn.disabled = Boolean(rpsState.matchWinner);
+  });
+
+  if (iLocked) {
+    rpsArenaMe.textContent = RPS_EMOJI_MAP[rpsState.myPick] || '✊';
+    rpsArenaMe.classList.add('shaking');
+    rpsArenaPartner.textContent = partnerLocked ? '🔒' : '⏳';
+    rpsArenaPartner.classList.toggle('shaking', partnerLocked);
+    rpsResultBanner.textContent = `Move locked! Waiting for ${activeFriend || 'partner'}...`;
+  } else if (rpsState.lastResult) {
+    const picks = rpsState.lastResult.picks || {};
+    rpsArenaMe.textContent = RPS_EMOJI_MAP[picks[me]] || '❓';
+    rpsArenaPartner.textContent = RPS_EMOJI_MAP[picks[partner]] || '❓';
+    rpsArenaMe.classList.remove('shaking');
+    rpsArenaPartner.classList.remove('shaking');
+    rpsResultBanner.textContent = rpsState.lastResult.text || 'Round complete!';
+
+    if (rpsState.round !== lastAnnouncedRpsRound) {
+      lastAnnouncedRpsRound = rpsState.round;
+      if (rpsState.matchWinner) {
+        triggerGameOutcomeSound(rpsState.matchWinner === me);
+      } else if (rpsState.lastResult.winnerUser) {
+        if (rpsState.lastResult.winnerUser === me) {
+          playRetroWinFanfare();
+        } else {
+          playFunnySadTrombone();
+        }
+      }
+    }
+  } else {
+    rpsArenaMe.textContent = '❓';
+    rpsArenaPartner.textContent = partnerLocked ? '🔒' : '❓';
+    rpsArenaMe.classList.remove('shaking');
+    rpsArenaPartner.classList.toggle('shaking', partnerLocked);
+    rpsResultBanner.textContent = partnerLocked
+      ? `${activeFriend || 'Partner'} picked! Choose your move 👇`
+      : 'Choose Rock, Paper, or Scissors';
+  }
+}
+
+rpsMoveButtons.forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (!activeFriend || !socket || rpsState.matchWinner) return;
+    socket.emit('rps-pick', { to: activeFriend, move: btn.dataset.move });
+  });
+});
+
+if (rpsResetBtn) {
+  rpsResetBtn.addEventListener('click', () => {
+    if (!activeFriend || !socket) return;
+    stopGameSong();
+    lastAnnouncedRpsRound = 0;
+    socket.emit('rps-reset', { to: activeFriend });
+  });
+}
+
+// ================= GAME 4: 30-SECOND HEART CATCH BATTLE =================
+
+function stopCatchBattleLoops() {
+  if (catchSpawnInterval) {
+    clearInterval(catchSpawnInterval);
+    catchSpawnInterval = null;
+  }
+  if (catchTimerInterval) {
+    clearInterval(catchTimerInterval);
+    catchTimerInterval = null;
+  }
+  if (catchArena) {
+    catchArena.querySelectorAll('.catch-target, .catch-pop-score').forEach(el => el.remove());
+  }
+}
+
+function spawnCatchTarget() {
+  if (!catchArena || !catchState.active) return;
+  const maxX = Math.max(20, catchArena.clientWidth - 60);
+  const maxY = Math.max(20, catchArena.clientHeight - 60);
+
+  const roll = Math.random();
+  let item = { emoji: '💖', delta: 1, color: '#f472b6' };
+  if (roll > 0.82) {
+    item = { emoji: '🌶️', delta: -1, color: '#ef4444' };
+  } else if (roll > 0.66) {
+    item = { emoji: '🌟', delta: 2, color: '#fde047' };
+  } else if (roll > 0.35) {
+    item = { emoji: '🐱', delta: 1, color: '#7dd3fc' };
+  }
+
+  const target = document.createElement('button');
+  target.type = 'button';
+  target.className = 'catch-target';
+  target.textContent = item.emoji;
+  target.style.left = `${8 + Math.random() * maxX}px`;
+  target.style.top = `${8 + Math.random() * maxY}px`;
+
+  const removeTimer = setTimeout(() => target.remove(), 1350);
+
+  const handleTap = (e) => {
+    e.preventDefault();
+    clearTimeout(removeTimer);
+    if (!catchState.active || !activeFriend || !socket) return;
+
+    const pop = document.createElement('span');
+    pop.className = 'catch-pop-score';
+    pop.textContent = item.delta > 0 ? `+${item.delta}` : `${item.delta}`;
+    pop.style.color = item.color;
+    pop.style.left = target.style.left;
+    pop.style.top = target.style.top;
+    catchArena.appendChild(pop);
+    setTimeout(() => pop.remove(), 600);
+
+    target.remove();
+    socket.emit('catch-score', { to: activeFriend, delta: item.delta });
+  };
+
+  target.addEventListener('pointerdown', handleTap);
+  catchArena.appendChild(target);
+}
+
+function renderCatchGame() {
+  if (!catchScoreMeEl || !catchScorePartnerEl || !catchTimerEl || !catchOverlay) return;
+  const me = (currentUser || '').toLowerCase();
+  const partner = (activeFriend || '').toLowerCase();
+  const scores = catchState.scores || {};
+
+  if (catchPartnerLabel) catchPartnerLabel.textContent = activeFriend || 'Partner';
+  catchScoreMeEl.textContent = String(scores[me] || 0);
+  catchScorePartnerEl.textContent = String(scores[partner] || 0);
+
+  if (catchState.active) {
+    catchOverlay.style.display = 'none';
+    if (!catchSpawnInterval) {
+      catchSpawnInterval = setInterval(spawnCatchTarget, 620);
+      spawnCatchTarget();
+    }
+    if (!catchTimerInterval) {
+      catchTimerInterval = setInterval(() => {
+        const left = Math.max(0, Math.ceil((catchState.endTime - Date.now()) / 1000));
+        catchTimerEl.textContent = String(left);
+        if (left <= 0) {
+          stopCatchBattleLoops();
+        }
+      }, 250);
+    }
+  } else {
+    stopCatchBattleLoops();
+    catchTimerEl.textContent = '30';
+    catchOverlay.style.display = 'flex';
+
+    if (catchState.winnerUser) {
+      if (catchState.winnerUser === 'draw') {
+        catchStatusMsg.textContent = `🤝 It's a tie (${scores[me] || 0} - ${scores[partner] || 0})!`;
+      } else {
+        const didWin = catchState.winnerUser === me;
+        catchStatusMsg.textContent = didWin
+          ? `🏆 You won ${scores[me] || 0} - ${scores[partner] || 0}!`
+          : `😜 ${activeFriend || 'Partner'} won ${scores[partner] || 0} - ${scores[me] || 0}!`;
+
+        if (catchState.endTime && catchState.endTime !== lastAnnouncedCatchEnd) {
+          lastAnnouncedCatchEnd = catchState.endTime;
+          triggerGameOutcomeSound(didWin);
+        }
+      }
+      if (catchStartBtn) catchStartBtn.textContent = 'Play Again 🚀';
+    } else {
+      catchStatusMsg.textContent = 'Ready for a 30-second reflex battle?';
+      if (catchStartBtn) catchStartBtn.textContent = 'Start Battle 🚀';
+    }
+  }
+}
+
+if (catchStartBtn) {
+  catchStartBtn.addEventListener('click', () => {
+    if (!activeFriend || !socket) return;
+    stopGameSong();
+    socket.emit('catch-start', { to: activeFriend });
+  });
+}
+
+// ================= GAME 5: WATCH TOGETHER + LIVE REACTIONS =================
 
 function extractYouTubeId(rawInput) {
   const val = String(rawInput || '').trim();
@@ -440,8 +1232,22 @@ function applyYouTubeVideo(videoId) {
   if (ytEmptyMsg) ytEmptyMsg.style.display = 'none';
   if (ytIframe) {
     ytIframe.style.display = 'block';
-    ytIframe.src = `https://www.youtube.com/embed/${videoId}?autoplay=0&rel=0`;
+    const nextSrc = `https://www.youtube.com/embed/${videoId}?enablejsapi=1&autoplay=0&rel=0`;
+    if (ytIframe.src !== nextSrc) {
+      ytIframe.src = nextSrc;
+    }
   }
+}
+
+function spawnWatchReaction(emoji) {
+  if (!watchReactionStage) return;
+  const el = document.createElement('span');
+  el.className = 'watch-flying-emoji';
+  el.textContent = emoji;
+  el.style.left = `${12 + Math.random() * 76}%`;
+  el.style.setProperty('--drift', `${(Math.random() - 0.5) * 70}px`);
+  watchReactionStage.appendChild(el);
+  setTimeout(() => el.remove(), 2250);
 }
 
 if (ytLoadForm) {
@@ -458,7 +1264,121 @@ if (ytLoadForm) {
   });
 }
 
-// Interactive Kittens Click/Tap Reaction
+watchReactButtons.forEach(btn => {
+  btn.addEventListener('click', () => {
+    const emoji = btn.dataset.emoji;
+    if (!emoji || !activeFriend || !socket) return;
+    socket.emit('watch-reaction', { to: activeFriend, emoji });
+  });
+});
+
+// ================= GAME 6: SHARED LIVE DOODLE CANVAS =================
+
+function drawDoodleSegment(seg) {
+  if (!doodleCtx || !doodleCanvas || !doodleCanvas.width || !doodleCanvas.height) return;
+  const w = doodleCanvas.width;
+  const h = doodleCanvas.height;
+  doodleCtx.save();
+  doodleCtx.beginPath();
+  doodleCtx.moveTo(seg.x0 * w, seg.y0 * h);
+  doodleCtx.lineTo(seg.x1 * w, seg.y1 * h);
+  doodleCtx.strokeStyle = seg.color || '#38bdf8';
+  doodleCtx.lineWidth = seg.size || 4;
+  doodleCtx.lineCap = 'round';
+  doodleCtx.lineJoin = 'round';
+  doodleCtx.stroke();
+  doodleCtx.restore();
+}
+
+function redrawAllDoodleStrokes() {
+  if (!doodleCtx || !doodleCanvas) return;
+  doodleCtx.clearRect(0, 0, doodleCanvas.width, doodleCanvas.height);
+  for (let i = 0; i < doodleStrokes.length; i++) {
+    drawDoodleSegment(doodleStrokes[i]);
+  }
+}
+
+function resizeDoodleCanvas() {
+  if (!doodleCanvas) return;
+  const rect = doodleCanvas.getBoundingClientRect();
+  if (rect.width < 10 || rect.height < 10) return;
+  if (doodleCanvas.width !== Math.round(rect.width) || doodleCanvas.height !== Math.round(rect.height)) {
+    doodleCanvas.width = Math.round(rect.width);
+    doodleCanvas.height = Math.round(rect.height);
+    redrawAllDoodleStrokes();
+  }
+}
+
+function initDoodleCanvas() {
+  if (!doodleCanvas) return;
+  doodleCtx = doodleCanvas.getContext('2d');
+
+  const getNormPoint = (e) => {
+    const rect = doodleCanvas.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)),
+      y: Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height))
+    };
+  };
+
+  doodleCanvas.addEventListener('pointerdown', (e) => {
+    if (!activeFriend || !socket) return;
+    resizeDoodleCanvas();
+    doodleCanvas.setPointerCapture(e.pointerId);
+    isDoodling = true;
+    lastDoodlePos = getNormPoint(e);
+  });
+
+  doodleCanvas.addEventListener('pointermove', (e) => {
+    if (!isDoodling || !lastDoodlePos || !activeFriend || !socket) return;
+    const nextPos = getNormPoint(e);
+    const segment = {
+      x0: lastDoodlePos.x,
+      y0: lastDoodlePos.y,
+      x1: nextPos.x,
+      y1: nextPos.y,
+      color: doodleColor,
+      size: doodleSize
+    };
+    lastDoodlePos = nextPos;
+    doodleStrokes.push(segment);
+    if (doodleStrokes.length > 2500) doodleStrokes.splice(0, 500);
+    drawDoodleSegment(segment);
+    socket.emit('doodle-draw', { to: activeFriend, segment });
+  });
+
+  const endDraw = () => {
+    isDoodling = false;
+    lastDoodlePos = null;
+  };
+  doodleCanvas.addEventListener('pointerup', endDraw);
+  doodleCanvas.addEventListener('pointercancel', endDraw);
+  doodleCanvas.addEventListener('pointerleave', endDraw);
+}
+
+doodleColorButtons.forEach(btn => {
+  btn.addEventListener('click', () => {
+    doodleColorButtons.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    doodleColor = btn.dataset.color || '#38bdf8';
+  });
+});
+
+if (doodleSizeInput) {
+  doodleSizeInput.addEventListener('input', () => {
+    doodleSize = Number(doodleSizeInput.value) || 4;
+  });
+}
+
+if (doodleClearBtn) {
+  doodleClearBtn.addEventListener('click', () => {
+    if (!activeFriend || !socket) return;
+    socket.emit('doodle-clear', { to: activeFriend });
+  });
+}
+
+// ================= INTERACTIVE PLAYING KITTENS =================
+
 if (cuteKittensStage) {
   cuteKittensStage.addEventListener('click', () => {
     cuteKittensStage.classList.remove('kitten-jump-boost');
@@ -471,16 +1391,19 @@ if (cuteKittensStage) {
   });
 }
 
-// ================= SHARED CANVAS PARTICLE ENGINE (MAIN & GAME MODE) =================
+// ================= SHARED CANVAS PARTICLE ENGINE (BATTERY-FRIENDLY) =================
 
-function mountParticleCanvas(canvasId, hueStart, hueRange, glowColor) {
+function mountParticleCanvas(canvasId, hueStart, hueRange, glowColor, isActiveCheck) {
   const canvas = document.getElementById(canvasId);
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
   let width = (canvas.width = canvas.clientWidth || window.innerWidth);
   let height = (canvas.height = canvas.clientHeight || window.innerHeight);
 
   const resizeCanvas = () => {
+    if (!isActiveCheck()) return;
     width = canvas.width = canvas.clientWidth || window.innerWidth;
     height = canvas.height = canvas.clientHeight || window.innerHeight;
   };
@@ -489,7 +1412,7 @@ function mountParticleCanvas(canvasId, hueStart, hueRange, glowColor) {
   const particles = [];
   const sparkles = [];
   const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-  const totalParticles = window.innerWidth < 768 ? 36 : 56;
+  const totalParticles = window.innerWidth < 768 ? 32 : 52;
 
   function createParticle(randomY = true) {
     const isHeart = Math.random() < 0.44;
@@ -537,7 +1460,8 @@ function mountParticleCanvas(canvasId, hueStart, hueRange, glowColor) {
   }
 
   const addSparkle = (x, y, burstCount = 1) => {
-    const maxCap = isTouchDevice ? 70 : 40;
+    if (!isActiveCheck()) return;
+    const maxCap = isTouchDevice ? 55 : 36;
     for (let k = 0; k < burstCount; k++) {
       if (sparkles.length >= maxCap) break;
       const baseSize = isTouchDevice ? 11 + Math.random() * 9 : 6 + Math.random() * 6;
@@ -570,6 +1494,9 @@ function mountParticleCanvas(canvasId, hueStart, hueRange, glowColor) {
   }, { passive: true });
 
   function renderFrame() {
+    requestAnimationFrame(renderFrame);
+    if (document.hidden || !isActiveCheck()) return;
+
     if (canvas.clientWidth && canvas.clientHeight && (width !== canvas.clientWidth || height !== canvas.clientHeight)) {
       resizeCanvas();
     }
@@ -621,26 +1548,24 @@ function mountParticleCanvas(canvasId, hueStart, hueRange, glowColor) {
       ctx.fill();
       ctx.restore();
     }
-
-    requestAnimationFrame(renderFrame);
   }
 
   requestAnimationFrame(renderFrame);
 }
 
 function initRomanticBackgroundCanvas() {
-  mountParticleCanvas('romantic-bg-canvas', 315, 45, 'rgba(244, 114, 182, 0.85)');
+  mountParticleCanvas('romantic-bg-canvas', 315, 45, 'rgba(244, 114, 182, 0.85)', () => !isGameModeOpen());
 }
 
 function initGameModeCanvas() {
-  mountParticleCanvas('game-mode-canvas', 192, 26, 'rgba(56, 189, 248, 0.85)');
+  mountParticleCanvas('game-mode-canvas', 192, 26, 'rgba(56, 189, 248, 0.85)', () => isGameModeOpen());
 }
 
 // ================= FLOATING HEART SHOWER =================
 
 function spawnHeartShower(count = 16) {
   if (!heartShowerStage) return;
-  const emojis = ['💖', '💗', '❤️', '💕', '🐾'];
+  const emojis = ['💖', '💗', '❤️', '💕', '🐾', '✨'];
   for (let i = 0; i < count; i++) {
     setTimeout(() => {
       const heart = document.createElement('span');
@@ -753,8 +1678,11 @@ async function syncPushSubscription(isManualClick = false) {
 
     await fetch('/subscribe', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: currentUser, subscription: sub })
+      headers: {
+        'Content-Type': 'application/json',
+        'x-auth-token': currentAuthToken || ''
+      },
+      body: JSON.stringify({ username: currentUser, token: currentAuthToken, subscription: sub })
     });
 
     enablePushBtn.textContent = 'Active • Test';
@@ -767,8 +1695,11 @@ async function syncPushSubscription(isManualClick = false) {
       showToast('Sending test background notification...', 'success');
       const testRes = await fetch('/test-push', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: currentUser })
+        headers: {
+          'Content-Type': 'application/json',
+          'x-auth-token': currentAuthToken || ''
+        },
+        body: JSON.stringify({ username: currentUser, token: currentAuthToken })
       });
 
       if (!testRes.ok) {
@@ -1048,13 +1979,31 @@ function enterApp(username, token) {
 }
 
 function forceLogoutToAuth(msg) {
-  if (socket) socket.disconnect();
+  cleanupCallUI();
+  stopGameSong();
+  stopCatchBattleLoops();
+  stopDuduAutoCycle();
+  if (socket) {
+    socket.disconnect();
+    socket = null;
+  }
   localStorage.removeItem('ps_username');
   localStorage.removeItem('ps_token');
   currentUser = null;
   currentAuthToken = null;
   activeFriend = null;
+  clearReplyPreview();
   messagesList.innerHTML = '';
+  if (ytIframe) {
+    ytIframe.src = '';
+    ytIframe.style.display = 'none';
+  }
+  if (ytEmptyMsg) ytEmptyMsg.style.display = 'block';
+  ytVideoId = null;
+  doodleStrokes = [];
+  redrawAllDoodleStrokes();
+  gameAudioMeta = { win: null, lose: null };
+  renderGameAudioSettings();
   if (liveTypingPill) liveTypingPill.style.display = 'none';
   settingsModal.style.display = 'none';
   if (gameModeModal) gameModeModal.style.display = 'none';
@@ -1072,12 +2021,15 @@ logoutBtn.addEventListener('click', () => forceLogoutToAuth());
 
 function openSettings() {
   cpFeedback.style.display = 'none';
+  if (gameAudioFeedback) gameAudioFeedback.style.display = 'none';
   if (daFeedback) daFeedback.style.display = 'none';
   if (deleteAccountInlineForm) deleteAccountInlineForm.style.display = 'none';
+  renderGameAudioSettings();
   settingsModal.style.display = 'flex';
 }
 
 function closeSettings() {
+  stopGameSong();
   settingsModal.style.display = 'none';
 }
 
@@ -1101,6 +2053,7 @@ toggleAutologinCheckbox.addEventListener('change', () => {
   localStorage.setItem('ps_autologin', userSettings.autoLogin);
   if (userSettings.autoLogin && currentUser) {
     localStorage.setItem('ps_username', currentUser);
+    if (currentAuthToken) localStorage.setItem('ps_token', currentAuthToken);
   } else {
     localStorage.removeItem('ps_username');
     localStorage.removeItem('ps_token');
@@ -1117,7 +2070,7 @@ clearChatBtn.addEventListener('click', async () => {
     message: `Delete all messages with ${activeFriend} for both of you?`,
     confirmText: 'Clear All'
   });
-  if (confirmed) {
+  if (confirmed && socket) {
     socket.emit('clear-chat', { friend: activeFriend });
     closeSettings();
     showToast('Chat history cleared.', 'success');
@@ -1227,11 +2180,7 @@ function closeMobileSidebar() {
 }
 
 if (toggleSidebarBtn) toggleSidebarBtn.addEventListener('click', openMobileSidebar);
-if (emptyOpenMenuBtn) {
-  emptyOpenMenuBtn.addEventListener('click', () => {
-    openMobileSidebar();
-  });
-}
+if (emptyOpenMenuBtn) emptyOpenMenuBtn.addEventListener('click', openMobileSidebar);
 if (closeSidebarBtn) closeSidebarBtn.addEventListener('click', closeMobileSidebar);
 if (sidebarBackdrop) sidebarBackdrop.addEventListener('click', closeMobileSidebar);
 
@@ -1261,7 +2210,7 @@ function hideRemoteTypingUI() {
   updateActiveFriendHeader();
 }
 
-// ================= SOCKET.IO & CHAT =================
+// ================= SOCKET.IO & REAL-TIME LISTENERS =================
 
 function connectSocket() {
   if (socket) socket.disconnect();
@@ -1270,10 +2219,130 @@ function connectSocket() {
     auth: { token: currentAuthToken || '' }
   });
 
-  socket.on('account-deleted', () => {
-    forceLogoutToAuth('Session ended or account deleted.');
+  socket.on('disconnect', (reason) => {
+    if (reason !== 'io client disconnect' && currentUser) {
+      showToast('Connection lost — reconnecting...', 'error');
+    }
   });
 
+  socket.on('reconnect', () => {
+    if (currentUser) {
+      showToast('Back online!', 'success');
+      if (activeFriend) {
+        socket.emit('load-private-chat', { friend: activeFriend });
+      }
+    }
+  });
+
+  socket.on('account-deleted', () => {
+    forceLogoutToAuth('Session expired or account deleted. Please sign in.');
+  });
+
+  socket.on('game-toast', ({ message, type }) => {
+    if (message) showToast(message, type || 'info');
+  });
+
+  // Sync Custom Game Songs across both players live
+  socket.on('game-audio-sync', ({ audio, notifyText } = {}) => {
+    if (audio) {
+      gameAudioMeta = audio;
+      renderGameAudioSettings();
+    }
+    if (notifyText) {
+      showToast(notifyText, 'success');
+    }
+  });
+
+  // Hydrate all 6 Game Mode modules + Custom Songs on initial connection
+  socket.on('game-sync-state', (state) => {
+    if (!state) return;
+    if (state.gameAudio) {
+      gameAudioMeta = state.gameAudio;
+      renderGameAudioSettings();
+    }
+    if (state.ttt) {
+      tttState = state.ttt;
+      tttWinLine = getWinningLine(tttState.board || []).line || [];
+      renderTicTacToe();
+    }
+    if (state.mind) {
+      mindState = state.mind;
+      renderMindSync();
+    }
+    if (state.rps) {
+      rpsState = state.rps;
+      lastAnnouncedRpsRound = rpsState.round || 1;
+      renderRps();
+    }
+    if (state.catchGame) {
+      catchState = state.catchGame;
+      lastAnnouncedCatchEnd = catchState.endTime || 0;
+      renderCatchGame();
+    }
+    if (state.ytVideoId) {
+      applyYouTubeVideo(state.ytVideoId);
+    }
+    if (Array.isArray(state.doodleStrokes)) {
+      doodleStrokes = state.doodleStrokes;
+      redrawAllDoodleStrokes();
+    }
+  });
+
+  // Live Game Listeners
+  socket.on('ttt-state', (state) => {
+    tttMovePending = false;
+    if (!state) return;
+    tttState = state;
+    tttWinLine = getWinningLine(tttState.board || []).line || [];
+    if (!tttState.winnerUser) lastAnnouncedTttWinKey = null;
+    renderTicTacToe();
+  });
+
+  socket.on('mind-state', (state) => {
+    if (!state) return;
+    mindState = state;
+    if (!mindState.revealed) lastAnnouncedMindKey = null;
+    renderMindSync();
+  });
+
+  socket.on('rps-state', (state) => {
+    if (!state) return;
+    rpsState = state;
+    renderRps();
+  });
+
+  socket.on('catch-state', (state) => {
+    if (!state) return;
+    catchState = state;
+    renderCatchGame();
+  });
+
+  socket.on('yt-sync', ({ from, videoId }) => {
+    if (videoId) {
+      applyYouTubeVideo(videoId);
+      if (from && from.toLowerCase() !== currentUser.toLowerCase()) {
+        showToast(`${from} loaded a YouTube video`, 'info');
+      }
+    }
+  });
+
+  socket.on('watch-reaction', ({ emoji }) => {
+    if (emoji) spawnWatchReaction(emoji);
+  });
+
+  socket.on('doodle-draw', (segment) => {
+    if (!segment) return;
+    doodleStrokes.push(segment);
+    if (doodleStrokes.length > 2500) doodleStrokes.splice(0, 500);
+    drawDoodleSegment(segment);
+  });
+
+  socket.on('doodle-clear', () => {
+    doodleStrokes = [];
+    redrawAllDoodleStrokes();
+  });
+
+  // Social & Chat Listeners
   socket.on('social-data', (data) => {
     socialState = data;
     renderSocialLists();
@@ -1285,6 +2354,7 @@ function connectSocket() {
       if (!stillFriends) {
         activeFriend = null;
         messagesList.innerHTML = '';
+        clearReplyPreview();
         hideRemoteTypingUI();
         emptyChatState.style.display = 'block';
         headerCallActions.style.display = 'none';
@@ -1337,52 +2407,6 @@ function connectSocket() {
     spawnHeartShower(16);
   });
 
-  socket.on('ttt-state', ({ board, turn, winner, isDraw }) => {
-    if (Array.isArray(board)) tttBoard = board;
-    if (turn) tttTurn = turn;
-    tttWinner = winner || null;
-    tttDraw = Boolean(isDraw);
-    const outcome = getWinningLine(tttBoard);
-    tttWinLine = outcome.line || [];
-    renderTicTacToe();
-  });
-
-  socket.on('ttt-reset', () => {
-    tttBoard = Array(9).fill(null);
-    tttTurn = '❤️';
-    tttWinner = null;
-    tttDraw = false;
-    tttWinLine = [];
-    lastAnnouncedWinKey = null;
-    renderTicTacToe();
-  });
-
-  socket.on('wyr-update', ({ picker, roundIndex, choice }) => {
-    if (typeof roundIndex === 'number' && roundIndex !== wyrRoundIndex) {
-      wyrRoundIndex = roundIndex;
-      wyrPicks = {};
-    }
-    if (picker && choice) {
-      wyrPicks[String(picker).toLowerCase()] = choice;
-    }
-    renderWouldYouRather();
-  });
-
-  socket.on('wyr-next', ({ roundIndex }) => {
-    wyrRoundIndex = typeof roundIndex === 'number' ? roundIndex : (wyrRoundIndex + 1) % wyrQuestions.length;
-    wyrPicks = {};
-    renderWouldYouRather();
-  });
-
-  socket.on('yt-sync', ({ from, videoId }) => {
-    if (videoId) {
-      applyYouTubeVideo(videoId);
-      if (from && from.toLowerCase() !== currentUser.toLowerCase()) {
-        showToast(`${from} loaded a YouTube video`, 'info');
-      }
-    }
-  });
-
   socket.on('messages-seen', ({ by }) => {
     if (!activeFriend || by.toLowerCase() !== activeFriend.toLowerCase()) return;
     document.querySelectorAll('.seen-status').forEach(el => {
@@ -1416,15 +2440,20 @@ function connectSocket() {
   socket.on('message-deleted', (id) => {
     const el = document.querySelector(`.msg-row[data-id="${id}"]`);
     if (el) el.remove();
+    if (replyingToMessage && String(replyingToMessage.id) === String(id)) {
+      clearReplyPreview();
+    }
   });
 
   socket.on('chat-cleared', ({ friend }) => {
     if (activeFriend && friend.toLowerCase() === activeFriend.toLowerCase()) {
       messagesList.innerHTML = '';
       lastRenderedDateKey = null;
+      clearReplyPreview();
     }
   });
 
+  // WebRTC Call Listeners
   socket.on('incoming-call', handleIncomingCall);
   socket.on('call-answered', handleCallAnswered);
   socket.on('ice-candidate', handleNewIceCandidate);
@@ -1511,7 +2540,7 @@ function renderSocialLists() {
       card.className = `user-card ${isSelected ? 'active-chat' : ''}`;
       card.innerHTML = `
         <div class="user-card-left">
-          <div class="avatar-circle small">${f.username.charAt(0).toUpperCase()}</div>
+          <div class="avatar-circle small">${escapeHTML(f.username.charAt(0).toUpperCase())}</div>
           <div>
             <div class="user-card-name">${escapeHTML(f.username)}</div>
             <div class="user-card-sub">
@@ -1551,8 +2580,11 @@ function selectFriend(friendName) {
   clearReplyPreview();
   updateActiveFriendHeader();
   renderTicTacToe();
+  renderMindSync();
+  renderRps();
+  renderCatchGame();
   renderSocialLists();
-  socket.emit('load-private-chat', { friend: friendName });
+  if (socket) socket.emit('load-private-chat', { friend: friendName });
 }
 
 function updateActiveFriendHeader() {
@@ -1600,7 +2632,7 @@ messageInput.addEventListener('input', () => {
   socket.emit('typing', { to: activeFriend });
   clearTimeout(typingTimeout);
   typingTimeout = setTimeout(() => {
-    socket.emit('stop-typing', { to: activeFriend });
+    if (socket && activeFriend) socket.emit('stop-typing', { to: activeFriend });
   }, 1200);
 });
 
@@ -1614,7 +2646,7 @@ headerVideoBtn.addEventListener('click', () => {
 
 chatForm.addEventListener('submit', (e) => {
   e.preventDefault();
-  if (!activeFriend) return;
+  if (!activeFriend || !socket) return;
   const text = messageInput.value.trim();
   if (!text) return;
 
@@ -1702,6 +2734,7 @@ function appendMessage(msg) {
   const bubbleEl = li.querySelector('.msg-bubble');
 
   const triggerReaction = () => {
+    if (!socket || !activeFriend) return;
     const burst = document.createElement('span');
     burst.className = 'double-tap-burst';
     burst.textContent = '❤️';
@@ -1710,13 +2743,26 @@ function appendMessage(msg) {
     socket.emit('react-message', { id: msg.id, friend: activeFriend });
   };
 
+  let lastTapAt = 0;
   bubbleEl.addEventListener('dblclick', triggerReaction);
+  bubbleEl.addEventListener('touchend', () => {
+    const now = Date.now();
+    if (now - lastTapAt > 0 && now - lastTapAt < 300) {
+      lastTapAt = 0;
+      triggerReaction();
+    } else {
+      lastTapAt = now;
+    }
+  }, { passive: true });
+
   li.querySelector('.react-btn').addEventListener('click', triggerReaction);
   li.querySelector('.reply-btn').addEventListener('click', () => setReplyPreview(msg));
 
   if (isMine) {
     li.querySelector('.delete-msg-btn').addEventListener('click', () => {
-      socket.emit('delete-message', { id: msg.id, friend: activeFriend });
+      if (socket && activeFriend) {
+        socket.emit('delete-message', { id: msg.id, friend: activeFriend });
+      }
     });
   }
 
@@ -1734,6 +2780,8 @@ localVideoWrap.addEventListener('click', () => {
 });
 
 async function startCall(targetUser, videoEnabled) {
+  if (peerConnection) return;
+  stopGameSong();
   const friendObj = socialState.friends.find(f => f.username.toLowerCase() === targetUser.toLowerCase());
   if (!friendObj || !friendObj.online) {
     showToast(`${targetUser} is offline right now.`, 'error');
@@ -1750,43 +2798,46 @@ async function startCall(targetUser, videoEnabled) {
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       video: videoEnabled ? { facingMode: currentFacingMode } : false
     });
+
+    outgoingCalleeAvatar.textContent = targetUser.charAt(0).toUpperCase();
+    outgoingCalleeName.textContent = targetUser;
+    outgoingOverlay.style.display = 'flex';
+    startCallTone('outgoing');
+
+    createPeerConnection(targetUser);
+    localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+
+    socket.emit('call-user', {
+      to: targetUser,
+      offer,
+      isVideo: videoEnabled
+    });
+
+    clearTimeout(callRingTimeout);
+    callRingTimeout = setTimeout(() => {
+      if (outgoingOverlay.style.display !== 'none') {
+        if (socket) {
+          socket.emit('end-call', { to: targetUser });
+          socket.emit('private-message', {
+            to: targetUser,
+            text: videoEnabled ? 'Missed video call' : 'Missed voice call'
+          });
+        }
+        cleanupCallUI();
+      }
+    }, 30000);
   } catch (err) {
+    cleanupCallUI();
     showToast('Microphone/camera permission is required for calling.', 'error');
-    return;
   }
-
-  outgoingCalleeAvatar.textContent = targetUser.charAt(0).toUpperCase();
-  outgoingCalleeName.textContent = targetUser;
-  outgoingOverlay.style.display = 'flex';
-  startCallTone('outgoing');
-
-  createPeerConnection(targetUser);
-  localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-
-  const offer = await peerConnection.createOffer();
-  await peerConnection.setLocalDescription(offer);
-
-  socket.emit('call-user', {
-    to: targetUser,
-    offer,
-    isVideo: videoEnabled
-  });
-
-  clearTimeout(callRingTimeout);
-  callRingTimeout = setTimeout(() => {
-    if (outgoingOverlay.style.display !== 'none') {
-      socket.emit('end-call', { to: targetUser });
-      socket.emit('private-message', {
-        to: targetUser,
-        text: videoEnabled ? 'Missed video call' : 'Missed voice call'
-      });
-      cleanupCallUI();
-    }
-  }, 30000);
 }
 
 function handleIncomingCall({ from, offer, isVideo }) {
-  if (peerConnection) return;
+  if (peerConnection || !from || !offer) return;
+  stopGameSong();
   currentCallPartner = from;
   incomingOfferData = offer;
   isCurrentCallVideo = Boolean(isVideo);
@@ -1809,6 +2860,7 @@ function handleIncomingCall({ from, offer, isVideo }) {
 }
 
 acceptCallBtn.addEventListener('click', async () => {
+  if (!incomingOfferData || peerConnection) return;
   stopCallTone();
   incomingOverlay.style.display = 'none';
   try {
@@ -1816,35 +2868,34 @@ acceptCallBtn.addEventListener('click', async () => {
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       video: isCurrentCallVideo ? { facingMode: currentFacingMode } : false
     });
+
+    createPeerConnection(currentCallPartner);
+    localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(incomingOfferData));
+    await flushIceQueue();
+
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+
+    socket.emit('make-answer', { to: currentCallPartner, answer });
+    showActiveCallScreen();
   } catch (err) {
-    showToast('Microphone/camera permission denied.', 'error');
-    socket.emit('reject-call', { to: currentCallPartner });
+    showToast('Microphone/camera permission denied or call failed.', 'error');
+    if (currentCallPartner && socket) socket.emit('reject-call', { to: currentCallPartner });
     cleanupCallUI();
-    return;
   }
-
-  createPeerConnection(currentCallPartner);
-  localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-
-  await peerConnection.setRemoteDescription(new RTCSessionDescription(incomingOfferData));
-  await flushIceQueue();
-
-  const answer = await peerConnection.createAnswer();
-  await peerConnection.setLocalDescription(answer);
-
-  socket.emit('make-answer', { to: currentCallPartner, answer });
-  showActiveCallScreen();
 });
 
 declineCallBtn.addEventListener('click', () => {
   stopCallTone();
-  if (currentCallPartner) socket.emit('reject-call', { to: currentCallPartner });
+  if (currentCallPartner && socket) socket.emit('reject-call', { to: currentCallPartner });
   cleanupCallUI();
 });
 
 cancelCallBtn.addEventListener('click', () => {
   stopCallTone();
-  if (currentCallPartner) {
+  if (currentCallPartner && socket) {
     socket.emit('end-call', { to: currentCallPartner });
     socket.emit('private-message', {
       to: currentCallPartner,
@@ -1858,16 +2909,23 @@ async function handleCallAnswered({ answer }) {
   stopCallTone();
   clearTimeout(callRingTimeout);
   outgoingOverlay.style.display = 'none';
-  if (!peerConnection) return;
-  await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-  await flushIceQueue();
-  showActiveCallScreen();
+  if (!peerConnection || !answer) return;
+  try {
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+    await flushIceQueue();
+    showActiveCallScreen();
+  } catch (err) {
+    cleanupCallUI();
+    showToast('Call connection failed.', 'error');
+  }
 }
 
 async function handleNewIceCandidate({ candidate }) {
   if (!candidate) return;
   if (peerConnection && peerConnection.remoteDescription) {
-    await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    try {
+      await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch (e) {}
   } else {
     iceCandidateQueue.push(candidate);
   }
@@ -1887,13 +2945,26 @@ function createPeerConnection(partnerUsername) {
   iceCandidateQueue = [];
 
   peerConnection.onicecandidate = (e) => {
-    if (e.candidate) {
+    if (e.candidate && socket) {
       socket.emit('ice-candidate', { to: partnerUsername, candidate: e.candidate });
     }
   };
 
   peerConnection.ontrack = (e) => {
-    remoteVideo.srcObject = e.streams[0];
+    if (e.streams && e.streams[0]) {
+      remoteVideo.srcObject = e.streams[0];
+    } else if (e.track) {
+      if (!remoteVideo.srcObject) remoteVideo.srcObject = new MediaStream();
+      remoteVideo.srcObject.addTrack(e.track);
+    }
+  };
+
+  peerConnection.onconnectionstatechange = () => {
+    if (!peerConnection) return;
+    if (['failed', 'disconnected', 'closed'].includes(peerConnection.connectionState)) {
+      cleanupCallUI();
+      showToast('Call disconnected.', 'info');
+    }
   };
 }
 
@@ -1910,8 +2981,8 @@ function showActiveCallScreen() {
   } else {
     localVideoWrap.style.display = 'none';
     audioPlaceholder.style.display = 'flex';
-    activeCallAvatar.textContent = currentCallPartner.charAt(0).toUpperCase();
-    activeCallUsername.textContent = currentCallPartner;
+    activeCallAvatar.textContent = (currentCallPartner || 'U').charAt(0).toUpperCase();
+    activeCallUsername.textContent = currentCallPartner || 'Connected';
     toggleCamBtn.style.display = 'none';
     flipCamBtn.style.display = 'none';
   }
@@ -1957,7 +3028,14 @@ toggleSpeakerBtn.addEventListener('click', () => {
 
 flipCamBtn.addEventListener('click', async () => {
   if (!localStream || !isCurrentCallVideo) return;
+  const prevFacingMode = currentFacingMode;
   currentFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
+
+  const oldVideoTrack = localStream.getVideoTracks()[0];
+  if (oldVideoTrack) {
+    localStream.removeTrack(oldVideoTrack);
+    oldVideoTrack.stop();
+  }
 
   try {
     const newVideoStream = await navigator.mediaDevices.getUserMedia({
@@ -1965,12 +3043,6 @@ flipCamBtn.addEventListener('click', async () => {
       audio: false
     });
     const newVideoTrack = newVideoStream.getVideoTracks()[0];
-    const oldVideoTrack = localStream.getVideoTracks()[0];
-
-    if (oldVideoTrack) {
-      localStream.removeTrack(oldVideoTrack);
-      oldVideoTrack.stop();
-    }
     localStream.addTrack(newVideoTrack);
     localVideo.srcObject = localStream;
     localVideo.classList.toggle('back-cam', currentFacingMode === 'environment');
@@ -1980,6 +3052,7 @@ flipCamBtn.addEventListener('click', async () => {
       if (sender) await sender.replaceTrack(newVideoTrack);
     }
   } catch (err) {
+    currentFacingMode = prevFacingMode;
     showToast('Unable to switch camera.', 'error');
   }
 });
@@ -2005,7 +3078,7 @@ toggleCamBtn.addEventListener('click', () => {
 });
 
 function emitMediaState() {
-  if (!currentCallPartner || !localStream) return;
+  if (!currentCallPartner || !localStream || !socket) return;
   const audioTrack = localStream.getAudioTracks()[0];
   const videoTrack = localStream.getVideoTracks()[0];
   socket.emit('call-media-state', {
@@ -2016,7 +3089,7 @@ function emitMediaState() {
 }
 
 endCallBtn.addEventListener('click', () => {
-  if (currentCallPartner) socket.emit('end-call', { to: currentCallPartner });
+  if (currentCallPartner && socket) socket.emit('end-call', { to: currentCallPartner });
   cleanupCallUI();
 });
 
@@ -2038,6 +3111,7 @@ function cleanupCallUI() {
     localStream = null;
   }
   if (peerConnection) {
+    peerConnection.onconnectionstatechange = null;
     peerConnection.close();
     peerConnection = null;
   }

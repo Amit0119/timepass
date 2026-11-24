@@ -11,7 +11,8 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// Security Headers & Payload Protection
+// ================= SECURITY HEADERS & MIDDLEWARE =================
+
 app.disable('x-powered-by');
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -35,7 +36,7 @@ if (useDB) {
   });
 }
 
-// Local Memory Fallback Stores
+// Local Memory Fallback Stores (used when DATABASE_URL is not set)
 const memoryUsers = [];
 const memoryFriendships = [];
 const memoryMessages = [];
@@ -46,6 +47,206 @@ const MASTER_RECOVERY_PIN = process.env.MASTER_RECOVERY_PIN || '0119';
 const LOCAL_VAPID_FILE = path.join(__dirname, '.vapid.json');
 let vapidKeys = null;
 let tokenSecret = process.env.TOKEN_SECRET || crypto.randomBytes(32).toString('hex');
+
+// ================= SHARED CUSTOM GAME SONGS STORE (SYNCED FOR BOTH USERS) =================
+
+const gameAudioStore = {
+  win: { buffer: null, mime: null, name: null, setBy: null, startSec: 0, updatedAt: 0 },
+  lose: { buffer: null, mime: null, name: null, setBy: null, startSec: 0, updatedAt: 0 }
+};
+
+function getGameAudioMeta() {
+  return {
+    win: gameAudioStore.win.buffer
+      ? {
+          name: gameAudioStore.win.name,
+          setBy: gameAudioStore.win.setBy,
+          startSec: gameAudioStore.win.startSec,
+          updatedAt: gameAudioStore.win.updatedAt
+        }
+      : null,
+    lose: gameAudioStore.lose.buffer
+      ? {
+          name: gameAudioStore.lose.name,
+          setBy: gameAudioStore.lose.setBy,
+          startSec: gameAudioStore.lose.startSec,
+          updatedAt: gameAudioStore.lose.updatedAt
+        }
+      : null
+  };
+}
+
+function clearGameAudioMemory(type) {
+  const targets = type ? [type] : ['win', 'lose'];
+  targets.forEach((t) => {
+    gameAudioStore[t] = { buffer: null, mime: null, name: null, setBy: null, startSec: 0, updatedAt: 0 };
+  });
+}
+
+function broadcastGameAudioMeta(notifyText = null) {
+  const meta = getGameAudioMeta();
+  for (const uname of userSockets.keys()) {
+    emitToUser(uname, 'game-audio-sync', { audio: meta, notifyText });
+  }
+}
+
+// ================= SHARED GAME MODE & DOODLE STATE =================
+
+const ALLOWED_TTT_EMOJIS = ['❤️', '✨', '🐱', '👑', '🔥', '🦋', '🍕', '🐼'];
+const ALLOWED_REACTIONS = ['😂', '😭', '❤️', '🤯', '🔥', '🍿'];
+const TTT_WINNER_DARES = [
+  'Loser owes a cute compliment right now!',
+  'Loser has to plan the next movie or coffee date!',
+  'Loser must send a sweet voice note or heart shower!',
+  'Loser treats the winner to their favorite snack!',
+  'Loser has to pick the next song/video to watch together!',
+  'Loser owes 3 nice things about the winner in chat!'
+];
+
+let catchTimerHandle = null;
+
+const serverGameState = {
+  ttt: {
+    board: Array(9).fill(null),
+    turnUser: null,
+    winnerUser: null,
+    winnerSymbol: null,
+    isDraw: false,
+    symbols: {},
+    scores: {},
+    lastDare: null
+  },
+  mind: {
+    promptIndex: 0,
+    customPrompt: null,
+    answers: {},
+    revealed: false,
+    streak: 0,
+    matched: false
+  },
+  rps: {
+    round: 1,
+    picks: {},
+    scores: {},
+    lastResult: null,
+    matchWinner: null
+  },
+  catchGame: {
+    active: false,
+    endTime: 0,
+    scores: {},
+    winnerUser: null
+  },
+  ytVideoId: null,
+  doodleStrokes: []
+};
+
+function resetAllGameState() {
+  if (catchTimerHandle) {
+    clearTimeout(catchTimerHandle);
+    catchTimerHandle = null;
+  }
+  serverGameState.ttt = {
+    board: Array(9).fill(null),
+    turnUser: null,
+    winnerUser: null,
+    winnerSymbol: null,
+    isDraw: false,
+    symbols: {},
+    scores: {},
+    lastDare: null
+  };
+  serverGameState.mind = {
+    promptIndex: 0,
+    customPrompt: null,
+    answers: {},
+    revealed: false,
+    streak: 0,
+    matched: false
+  };
+  serverGameState.rps = {
+    round: 1,
+    picks: {},
+    scores: {},
+    lastResult: null,
+    matchWinner: null
+  };
+  serverGameState.catchGame = {
+    active: false,
+    endTime: 0,
+    scores: {},
+    winnerUser: null
+  };
+  serverGameState.ytVideoId = null;
+  serverGameState.doodleStrokes = [];
+  clearGameAudioMemory();
+}
+
+function getPublicMindState(forUsername) {
+  const m = serverGameState.mind;
+  const me = String(forUsername || '').toLowerCase();
+  const maskedAnswers = {};
+  for (const [key, val] of Object.entries(m.answers)) {
+    maskedAnswers[key] = {
+      name: val.name,
+      locked: true,
+      text: m.revealed || key === me ? val.text : null
+    };
+  }
+  return {
+    promptIndex: m.promptIndex,
+    customPrompt: m.customPrompt,
+    answers: maskedAnswers,
+    revealed: m.revealed,
+    streak: m.streak,
+    matched: m.matched
+  };
+}
+
+function getPublicRpsState(forUsername) {
+  const r = serverGameState.rps;
+  const me = String(forUsername || '').toLowerCase();
+  return {
+    round: r.round,
+    lockedUsers: Object.keys(r.picks),
+    myPick: r.picks[me] || null,
+    scores: r.scores,
+    lastResult: r.lastResult,
+    matchWinner: r.matchWinner
+  };
+}
+
+function ensureTTTSymbols(userA, userB) {
+  const a = String(userA).toLowerCase();
+  const b = String(userB).toLowerCase();
+  const first = a < b ? a : b;
+  const second = a < b ? b : a;
+
+  if (!serverGameState.ttt.symbols[first]) {
+    serverGameState.ttt.symbols[first] = '❤️';
+  }
+  if (!serverGameState.ttt.symbols[second] || serverGameState.ttt.symbols[second] === serverGameState.ttt.symbols[first]) {
+    const fallback = ALLOWED_TTT_EMOJIS.find(e => e !== serverGameState.ttt.symbols[first]) || '✨';
+    serverGameState.ttt.symbols[second] = fallback;
+  }
+  if (!serverGameState.ttt.turnUser) {
+    serverGameState.ttt.turnUser = first;
+  }
+}
+
+function checkTTTWinner(board) {
+  const lines = [
+    [0, 1, 2], [3, 4, 5], [6, 7, 8],
+    [0, 3, 6], [1, 4, 7], [2, 5, 8],
+    [0, 4, 8], [2, 4, 6]
+  ];
+  for (const [a, b, c] of lines) {
+    if (board[a] && board[a] === board[b] && board[a] === board[c]) {
+      return board[a];
+    }
+  }
+  return null;
+}
 
 // ================= CRYPTO & SECURITY HELPERS =================
 
@@ -86,8 +287,16 @@ function verifyAuthToken(username, token) {
 
 const authAttempts = new Map();
 function checkRateLimit(req, res) {
-  const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'local';
+  const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  const ip = forwarded || req.socket.remoteAddress || 'local';
   const now = Date.now();
+
+  if (authAttempts.size > 500) {
+    for (const [k, v] of authAttempts.entries()) {
+      if (now > v.resetAt) authAttempts.delete(k);
+    }
+  }
+
   const entry = authAttempts.get(ip) || { count: 0, resetAt: now + 10 * 60 * 1000 };
   if (now > entry.resetAt) {
     entry.count = 0;
@@ -115,10 +324,18 @@ function loadOrCreateLocalVapidKeys() {
   return generated;
 }
 
+function safeDecodeHeader(val) {
+  try {
+    return decodeURIComponent(String(val || ''));
+  } catch (e) {
+    return String(val || '');
+  }
+}
+
 async function initDB() {
   if (!useDB) {
     vapidKeys = loadOrCreateLocalVapidKeys();
-    tokenSecret = crypto.createHash('sha256').update(vapidKeys.privateKey).digest('hex');
+    tokenSecret = process.env.TOKEN_SECRET || crypto.createHash('sha256').update(vapidKeys.privateKey).digest('hex');
     webpush.setVapidDetails('mailto:admin@miniworld.app', vapidKeys.publicKey, vapidKeys.privateKey);
     console.log('Running in local memory mode with persistent VAPID & security keys.');
     return;
@@ -197,6 +414,26 @@ async function initDB() {
       );
     }
 
+    // Restore persisted custom game songs (if previously uploaded)
+    for (const type of ['win', 'lose']) {
+      const aRes = await pool.query(`SELECT value FROM app_config WHERE key = $1`, [`game_audio_${type}`]);
+      if (aRes.rows.length > 0) {
+        try {
+          const saved = JSON.parse(aRes.rows[0].value);
+          if (saved && saved.base64) {
+            gameAudioStore[type] = {
+              buffer: Buffer.from(saved.base64, 'base64'),
+              mime: saved.mime || 'audio/mpeg',
+              name: saved.name || 'Custom Song',
+              setBy: saved.setBy || 'Partner',
+              startSec: Number(saved.startSec) || 0,
+              updatedAt: Number(saved.updatedAt) || Date.now()
+            };
+          }
+        } catch (e) {}
+      }
+    }
+
     tokenSecret = process.env.TOKEN_SECRET || crypto.createHash('sha256').update(vapidKeys.privateKey).digest('hex');
 
     webpush.setVapidDetails(
@@ -205,12 +442,191 @@ async function initDB() {
       process.env.VAPID_PRIVATE_KEY || vapidKeys.privateKey
     );
 
-    console.log('Database, Security, and Web-Push initialized.');
+    console.log('Database, Security, Game Audio, and Web-Push initialized.');
   } catch (err) {
     console.error('Database initialization error:', err);
+    vapidKeys = loadOrCreateLocalVapidKeys();
+    tokenSecret = process.env.TOKEN_SECRET || crypto.createHash('sha256').update(vapidKeys.privateKey).digest('hex');
+    webpush.setVapidDetails('mailto:admin@miniworld.app', vapidKeys.publicKey, vapidKeys.privateKey);
   }
 }
-initDB();
+
+// ================= CUSTOM GAME SONG UPLOAD, STREAMING & DELETE ROUTES =================
+
+// Upload custom Win or Lose song (up to 5 MB raw audio binary — no extra packages needed)
+app.post(
+  '/game-audio/:type',
+  express.raw({ type: '*/*', limit: '5mb' }),
+  async (req, res) => {
+    try {
+      const type = req.params.type;
+      if (type !== 'win' && type !== 'lose') {
+        return res.status(400).json({ error: 'Invalid audio slot.' });
+      }
+
+      const username = safeDecodeHeader(req.headers['x-auth-user']).trim();
+      const token = String(req.headers['x-auth-token'] || '');
+      if (!verifyAuthToken(username, token)) {
+        return res.status(401).json({ error: 'Unauthorized upload request.' });
+      }
+
+      if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+        return res.status(400).json({ error: 'Empty audio file.' });
+      }
+      if (req.body.length > 5 * 1024 * 1024) {
+        return res.status(413).json({ error: 'Song file must be under 5 MB.' });
+      }
+
+      const rawMime = String(req.headers['content-type'] || 'audio/mpeg').split(';')[0].trim();
+      const mime = rawMime.startsWith('audio/') ? rawMime : 'audio/mpeg';
+      const fileName = safeDecodeHeader(req.headers['x-audio-name']).trim().slice(0, 80) || 'Custom Song';
+      const startSec = Math.max(0, Math.min(3600, Number(req.headers['x-audio-start']) || 0));
+      const updatedAt = Date.now();
+
+      gameAudioStore[type] = {
+        buffer: req.body,
+        mime,
+        name: fileName,
+        setBy: username,
+        startSec,
+        updatedAt
+      };
+
+      if (useDB) {
+        const dbPayload = JSON.stringify({
+          base64: req.body.toString('base64'),
+          mime,
+          name: fileName,
+          setBy: username,
+          startSec,
+          updatedAt
+        });
+        await pool.query(
+          `INSERT INTO app_config (key, value)
+           VALUES ($1, $2)
+           ON CONFLICT (key) DO UPDATE SET value = $2`,
+          [`game_audio_${type}`, dbPayload]
+        );
+      }
+
+      broadcastGameAudioMeta(`${username} set a new ${type === 'win' ? 'Win' : 'Lose'} Song: ${fileName}`);
+      return res.json({ success: true, audio: getGameAudioMeta() });
+    } catch (err) {
+      console.error('Game audio upload error:', err);
+      return res.status(500).json({ error: 'Failed to save song. Try a smaller audio clip (under 5 MB).' });
+    }
+  }
+);
+
+// Update only startSec without re-uploading the song
+app.post('/game-audio-meta/:type', async (req, res) => {
+  try {
+    const type = req.params.type;
+    if (type !== 'win' && type !== 'lose') {
+      return res.status(400).json({ error: 'Invalid audio slot.' });
+    }
+    const username = (req.body?.username || '').trim();
+    const token = req.body?.token || req.headers['x-auth-token'] || '';
+    if (!verifyAuthToken(username, token)) {
+      return res.status(401).json({ error: 'Unauthorized request.' });
+    }
+    const entry = gameAudioStore[type];
+    if (!entry.buffer) {
+      return res.status(404).json({ error: 'No song uploaded yet for this slot.' });
+    }
+
+    entry.startSec = Math.max(0, Math.min(3600, Number(req.body?.startSec) || 0));
+    entry.updatedAt = Date.now();
+
+    if (useDB) {
+      const dbPayload = JSON.stringify({
+        base64: entry.buffer.toString('base64'),
+        mime: entry.mime,
+        name: entry.name,
+        setBy: entry.setBy,
+        startSec: entry.startSec,
+        updatedAt: entry.updatedAt
+      });
+      await pool.query(
+        `INSERT INTO app_config (key, value)
+         VALUES ($1, $2)
+         ON CONFLICT (key) DO UPDATE SET value = $2`,
+        [`game_audio_${type}`, dbPayload]
+      );
+    }
+
+    broadcastGameAudioMeta(`${username} updated ${type === 'win' ? 'Win' : 'Lose'} Song start time.`);
+    return res.json({ success: true, audio: getGameAudioMeta() });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to update start time.' });
+  }
+});
+
+// Stream custom song with HTTP Range support (required for mobile audio seeking)
+app.get('/game-audio/:type', (req, res) => {
+  const type = req.params.type;
+  if (type !== 'win' && type !== 'lose') return res.status(400).end();
+
+  const username = String(req.query.u || '').trim();
+  const token = String(req.query.t || '');
+  if (!verifyAuthToken(username, token)) {
+    return res.status(401).end();
+  }
+
+  const entry = gameAudioStore[type];
+  if (!entry || !entry.buffer) return res.status(404).end();
+
+  const buf = entry.buffer;
+  const total = buf.length;
+  const range = req.headers.range;
+
+  res.setHeader('Content-Type', entry.mime || 'audio/mpeg');
+  res.setHeader('Accept-Ranges', 'bytes');
+  res.setHeader('Cache-Control', 'no-store');
+
+  if (range) {
+    const parts = range.replace(/bytes=/, '').split('-');
+    const start = parseInt(parts[0], 10);
+    const end = parts[1] ? parseInt(parts[1], 10) : total - 1;
+    if (isNaN(start) || start >= total || end >= total || start > end) {
+      res.status(416).setHeader('Content-Range', `bytes */${total}`).end();
+      return;
+    }
+    res.status(206);
+    res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
+    res.setHeader('Content-Length', end - start + 1);
+    res.end(buf.subarray(start, end + 1));
+  } else {
+    res.status(200);
+    res.setHeader('Content-Length', total);
+    res.end(buf);
+  }
+});
+
+// Remove custom song and revert to built-in funny sound
+app.delete('/game-audio/:type', async (req, res) => {
+  try {
+    const type = req.params.type;
+    if (type !== 'win' && type !== 'lose') {
+      return res.status(400).json({ error: 'Invalid audio slot.' });
+    }
+    const username = safeDecodeHeader(req.headers['x-auth-user']).trim();
+    const token = String(req.headers['x-auth-token'] || '');
+    if (!verifyAuthToken(username, token)) {
+      return res.status(401).json({ error: 'Unauthorized request.' });
+    }
+
+    clearGameAudioMemory(type);
+    if (useDB) {
+      await pool.query(`DELETE FROM app_config WHERE key = $1`, [`game_audio_${type}`]);
+    }
+
+    broadcastGameAudioMeta(`${username} cleared the ${type === 'win' ? 'Win' : 'Lose'} Song.`);
+    return res.json({ success: true, audio: getGameAudioMeta() });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to remove song.' });
+  }
+});
 
 // ================= WEB PUSH ROUTES =================
 
@@ -221,10 +637,15 @@ app.get('/vapid-public-key', (req, res) => {
 
 app.post('/subscribe', async (req, res) => {
   try {
-    const username = (req.body.username || '').trim();
-    const subscription = req.body.subscription;
+    const username = (req.body?.username || '').trim();
+    const token = req.body?.token || req.headers['x-auth-token'] || '';
+    const subscription = req.body?.subscription;
+
     if (!username || !subscription || !subscription.endpoint) {
       return res.status(400).json({ error: 'Invalid subscription data' });
+    }
+    if (!verifyAuthToken(username, token)) {
+      return res.status(401).json({ error: 'Unauthorized subscription request' });
     }
 
     if (useDB) {
@@ -250,8 +671,13 @@ app.post('/subscribe', async (req, res) => {
 
 app.post('/test-push', async (req, res) => {
   try {
-    const username = (req.body.username || '').trim();
+    const username = (req.body?.username || '').trim();
+    const token = req.body?.token || req.headers['x-auth-token'] || '';
+
     if (!username) return res.status(400).json({ error: 'Username required' });
+    if (!verifyAuthToken(username, token)) {
+      return res.status(401).json({ error: 'Unauthorized request' });
+    }
 
     const sentCount = await sendPushNotification(username, {
       title: 'MINI-WORLD',
@@ -360,9 +786,9 @@ async function ensureVIPAutoConnected() {
 app.post('/register', async (req, res) => {
   if (!checkRateLimit(req, res)) return;
   try {
-    const username = (req.body.username || '').trim().replace(/[<>]/g, '');
-    const password = req.body.password || '';
-    const recoveryCode = (req.body.recoveryCode || MASTER_RECOVERY_PIN).trim() || MASTER_RECOVERY_PIN;
+    const username = (req.body?.username || '').trim().replace(/[<>]/g, '');
+    const password = req.body?.password || '';
+    const recoveryCode = (req.body?.recoveryCode || MASTER_RECOVERY_PIN).trim() || MASTER_RECOVERY_PIN;
 
     if (!username || username.length < 2 || password.length < 6) {
       return res.status(400).json({ error: 'Username (min 2 chars) and password (min 6 chars) required.' });
@@ -415,8 +841,8 @@ app.post('/register', async (req, res) => {
 app.post('/login', async (req, res) => {
   if (!checkRateLimit(req, res)) return;
   try {
-    const username = (req.body.username || '').trim();
-    const password = req.body.password || '';
+    const username = (req.body?.username || '').trim();
+    const password = req.body?.password || '';
 
     if (!username || !password) {
       return res.status(400).json({ error: 'Enter both username and password.' });
@@ -456,10 +882,10 @@ app.post('/login', async (req, res) => {
 app.post('/change-password', async (req, res) => {
   if (!checkRateLimit(req, res)) return;
   try {
-    const username = (req.body.username || '').trim();
-    const oldPassword = req.body.oldPassword || '';
-    const newPassword = req.body.newPassword || '';
-    const newRecoveryCode = (req.body.newRecoveryCode || '').trim();
+    const username = (req.body?.username || '').trim();
+    const oldPassword = req.body?.oldPassword || '';
+    const newPassword = req.body?.newPassword || '';
+    const newRecoveryCode = (req.body?.newRecoveryCode || '').trim();
 
     if (!username || !oldPassword || newPassword.length < 6) {
       return res.status(400).json({ error: 'New password must be at least 6 characters.' });
@@ -498,9 +924,9 @@ app.post('/change-password', async (req, res) => {
 app.post('/reset-password', async (req, res) => {
   if (!checkRateLimit(req, res)) return;
   try {
-    const username = (req.body.username || '').trim();
-    const recoveryCode = (req.body.recoveryCode || '').trim();
-    const newPassword = req.body.newPassword || '';
+    const username = (req.body?.username || '').trim();
+    const recoveryCode = (req.body?.recoveryCode || '').trim();
+    const newPassword = req.body?.newPassword || '';
 
     if (!username || !recoveryCode || newPassword.length < 6) {
       return res.status(400).json({ error: 'Enter username, recovery PIN, and new password (min 6 chars).' });
@@ -543,9 +969,9 @@ app.post('/reset-password', async (req, res) => {
 app.post('/delete-account', async (req, res) => {
   if (!checkRateLimit(req, res)) return;
   try {
-    const username = (req.body.username || '').trim();
-    const password = req.body.password || '';
-    const recoveryCode = (req.body.recoveryCode || req.body.confirmation || '').trim();
+    const username = (req.body?.username || '').trim();
+    const password = req.body?.password || '';
+    const recoveryCode = (req.body?.recoveryCode || req.body?.confirmation || '').trim();
 
     if (!username) {
       return res.status(400).json({ error: 'Username is required.' });
@@ -576,6 +1002,7 @@ app.post('/delete-account', async (req, res) => {
       await pool.query('DELETE FROM messages WHERE LOWER(username) = LOWER($1) OR LOWER(recipient) = LOWER($1)', [exactUsername]);
       await pool.query('DELETE FROM friendships WHERE LOWER(requester) = LOWER($1) OR LOWER(recipient) = LOWER($1)', [exactUsername]);
       await pool.query('DELETE FROM users WHERE id = $1', [user.id]);
+      await pool.query(`DELETE FROM app_config WHERE key IN ('game_audio_win', 'game_audio_lose')`);
     } else {
       const idx = memoryUsers.findIndex(u => u.username.toLowerCase() === username.toLowerCase());
       if (idx === -1) {
@@ -612,6 +1039,8 @@ app.post('/delete-account', async (req, res) => {
         }
       }
     }
+
+    resetAllGameState();
 
     for (const [uname, set] of userSockets.entries()) {
       if (uname.toLowerCase() === exactUsername.toLowerCase()) {
@@ -763,6 +1192,7 @@ async function broadcastSocialUpdates() {
 }
 
 async function areFriends(userA, userB) {
+  if (!userA || !userB) return false;
   await ensureVIPAutoConnected();
   if (useDB) {
     const res = await pool.query(
@@ -785,17 +1215,12 @@ async function areFriends(userA, userB) {
 // ================= SOCKET.IO ENGINE =================
 
 io.on('connection', async (socket) => {
-  const rawUsername = (socket.handshake.query.username || '').trim();
+  const rawUsername = (socket.handshake.query?.username || '').trim();
   const token = socket.handshake.auth?.token || socket.handshake.query?.token || '';
 
-  if (!rawUsername) {
-    socket.disconnect();
-    return;
-  }
-
-  if (token && !verifyAuthToken(rawUsername, token)) {
+  if (!rawUsername || !token || !verifyAuthToken(rawUsername, token)) {
     socket.emit('account-deleted');
-    socket.disconnect();
+    socket.disconnect(true);
     return;
   }
 
@@ -805,11 +1230,22 @@ io.on('connection', async (socket) => {
       const uCheck = await pool.query('SELECT username FROM users WHERE LOWER(username) = LOWER($1)', [rawUsername]);
       if (uCheck.rows.length === 0) {
         socket.emit('account-deleted');
-        socket.disconnect();
+        socket.disconnect(true);
         return;
       }
       username = uCheck.rows[0].username;
-    } catch (e) {}
+    } catch (e) {
+      socket.disconnect(true);
+      return;
+    }
+  } else {
+    const uObj = memoryUsers.find(u => u.username.toLowerCase() === rawUsername.toLowerCase());
+    if (!uObj) {
+      socket.emit('account-deleted');
+      socket.disconnect(true);
+      return;
+    }
+    username = uObj.username;
   }
 
   socket.username = username;
@@ -821,12 +1257,29 @@ io.on('connection', async (socket) => {
   await updateLastSeen(username);
   await broadcastSocialUpdates();
 
-  socket.on('request-social-data', async () => {
-    const data = await getSocialDataForUser(username);
-    socket.emit('social-data', data);
+  // Send full synchronized Game Mode, Doodle, and Custom Song metadata on connect
+  socket.emit('game-sync-state', {
+    ttt: serverGameState.ttt,
+    mind: getPublicMindState(username),
+    rps: getPublicRpsState(username),
+    catchGame: serverGameState.catchGame,
+    ytVideoId: serverGameState.ytVideoId,
+    doodleStrokes: serverGameState.doodleStrokes,
+    gameAudio: getGameAudioMeta()
   });
 
-  socket.on('send-friend-request', async ({ to }) => {
+  // -------- CHAT & SOCIAL EVENTS --------
+
+  socket.on('request-social-data', async () => {
+    try {
+      const data = await getSocialDataForUser(username);
+      socket.emit('social-data', data);
+    } catch (err) {
+      console.error('request-social-data error:', err);
+    }
+  });
+
+  socket.on('send-friend-request', async ({ to } = {}) => {
     if (!to || to.toLowerCase() === username.toLowerCase()) return;
     await ensureVIPAutoConnected();
     await broadcastSocialUpdates();
@@ -837,11 +1290,13 @@ io.on('connection', async (socket) => {
     await broadcastSocialUpdates();
   });
 
-  socket.on('load-private-chat', async ({ friend }) => {
+  socket.on('load-private-chat', async ({ friend } = {}) => {
     if (!friend) return;
     try {
       const allowed = await areFriends(username, friend);
       if (!allowed) return;
+
+      ensureTTTSymbols(username, friend);
 
       if (useDB) {
         await pool.query(
@@ -877,12 +1332,13 @@ io.on('connection', async (socket) => {
       }
       const updatedSocial = await getSocialDataForUser(username);
       socket.emit('social-data', updatedSocial);
+      socket.emit('ttt-state', serverGameState.ttt);
     } catch (err) {
       console.error('Load private chat error:', err);
     }
   });
 
-  socket.on('private-message', async ({ to, text, replyTo }) => {
+  socket.on('private-message', async ({ to, text, replyTo } = {}) => {
     const cleanText = (text || '').trim().slice(0, 2000);
     if (!to || !cleanText) return;
 
@@ -935,61 +1391,353 @@ io.on('connection', async (socket) => {
     }
   });
 
-  socket.on('heart-shower', ({ to }) => {
+  socket.on('heart-shower', async ({ to } = {}) => {
+    if (!to || !(await areFriends(username, to))) return;
     emitToUser(username, 'heart-shower', { from: username });
-    if (to && isUserOnline(to)) {
+    if (isUserOnline(to)) {
       emitToUser(to, 'heart-shower', { from: username });
     }
   });
 
-  // ================= GAME MODE & WATCH TOGETHER SYNC =================
+  // -------- 1. UPGRADED TIC-TAC-TOE --------
 
-  socket.on('ttt-move', async ({ to, board, turn, winner, isDraw }) => {
-    if (!to || !Array.isArray(board)) return;
-    if (!(await areFriends(username, to))) return;
-    const payload = { from: username, board, turn, winner, isDraw };
-    emitToUser(username, 'ttt-state', payload);
-    if (isUserOnline(to)) emitToUser(to, 'ttt-state', payload);
+  socket.on('ttt-set-symbol', async ({ to, symbol } = {}) => {
+    try {
+      if (!to || !ALLOWED_TTT_EMOJIS.includes(symbol)) return;
+      if (!(await areFriends(username, to))) return;
+
+      ensureTTTSymbols(username, to);
+      const me = username.toLowerCase();
+      const partner = to.toLowerCase();
+
+      if (serverGameState.ttt.symbols[partner] === symbol) {
+        socket.emit('game-toast', { message: `${to} is already using ${symbol}! Pick another.`, type: 'error' });
+        return;
+      }
+
+      const oldSymbol = serverGameState.ttt.symbols[me];
+      serverGameState.ttt.symbols[me] = symbol;
+      serverGameState.ttt.board = serverGameState.ttt.board.map(c => (c === oldSymbol ? symbol : c));
+      if (serverGameState.ttt.winnerSymbol === oldSymbol) {
+        serverGameState.ttt.winnerSymbol = symbol;
+      }
+
+      emitToUser(username, 'ttt-state', serverGameState.ttt);
+      if (isUserOnline(to)) emitToUser(to, 'ttt-state', serverGameState.ttt);
+    } catch (err) {
+      console.error('ttt-set-symbol error:', err);
+    }
   });
 
-  socket.on('ttt-reset', async ({ to }) => {
-    if (!to) return;
-    if (!(await areFriends(username, to))) return;
-    const payload = { from: username };
-    emitToUser(username, 'ttt-reset', payload);
-    if (isUserOnline(to)) emitToUser(to, 'ttt-reset', payload);
+  socket.on('ttt-move', async ({ to, index } = {}) => {
+    try {
+      if (!to || typeof index !== 'number' || index < 0 || index > 8) return;
+      if (!(await areFriends(username, to))) return;
+
+      ensureTTTSymbols(username, to);
+      const ttt = serverGameState.ttt;
+      const me = username.toLowerCase();
+      const partner = to.toLowerCase();
+
+      if (ttt.winnerUser || ttt.isDraw || ttt.board[index]) return;
+      if (ttt.turnUser !== me) return;
+
+      const mySymbol = ttt.symbols[me];
+      ttt.board[index] = mySymbol;
+
+      const winSym = checkTTTWinner(ttt.board);
+      const draw = !winSym && ttt.board.every(Boolean);
+
+      if (winSym) {
+        ttt.winnerUser = me;
+        ttt.winnerSymbol = winSym;
+        ttt.scores[me] = (ttt.scores[me] || 0) + 1;
+        ttt.lastDare = TTT_WINNER_DARES[Math.floor(Math.random() * TTT_WINNER_DARES.length)];
+      } else if (draw) {
+        ttt.isDraw = true;
+        ttt.lastDare = null;
+      } else {
+        ttt.turnUser = partner;
+      }
+
+      emitToUser(username, 'ttt-state', ttt);
+      if (isUserOnline(to)) emitToUser(to, 'ttt-state', ttt);
+    } catch (err) {
+      console.error('ttt-move error:', err);
+    }
   });
 
-  socket.on('wyr-pick', async ({ to, roundIndex, choice }) => {
-    if (!to || !choice) return;
-    if (!(await areFriends(username, to))) return;
-    const payload = { picker: username, roundIndex, choice };
-    emitToUser(username, 'wyr-update', payload);
-    if (isUserOnline(to)) emitToUser(to, 'wyr-update', payload);
+  socket.on('ttt-reset', async ({ to, resetScores } = {}) => {
+    try {
+      if (!to || !(await areFriends(username, to))) return;
+      ensureTTTSymbols(username, to);
+      const me = username.toLowerCase();
+      const partner = to.toLowerCase();
+
+      serverGameState.ttt.board = Array(9).fill(null);
+      serverGameState.ttt.winnerUser = null;
+      serverGameState.ttt.winnerSymbol = null;
+      serverGameState.ttt.isDraw = false;
+      serverGameState.ttt.lastDare = null;
+      serverGameState.ttt.turnUser = serverGameState.ttt.turnUser === me ? partner : me;
+
+      if (resetScores) {
+        serverGameState.ttt.scores = {};
+      }
+
+      emitToUser(username, 'ttt-state', serverGameState.ttt);
+      if (isUserOnline(to)) emitToUser(to, 'ttt-state', serverGameState.ttt);
+    } catch (err) {
+      console.error('ttt-reset error:', err);
+    }
   });
 
-  socket.on('wyr-next', async ({ to, roundIndex }) => {
-    if (!to) return;
-    if (!(await areFriends(username, to))) return;
-    const payload = { roundIndex };
-    emitToUser(username, 'wyr-next', payload);
-    if (isUserOnline(to)) emitToUser(to, 'wyr-next', payload);
+  // -------- 2. MIND SYNC (TELEPATHY TEST) --------
+
+  socket.on('mind-submit', async ({ to, text } = {}) => {
+    try {
+      const clean = String(text || '').trim().slice(0, 60);
+      if (!to || !clean) return;
+      if (!(await areFriends(username, to))) return;
+
+      const m = serverGameState.mind;
+      if (m.revealed) return;
+
+      const me = username.toLowerCase();
+      const partner = to.toLowerCase();
+      m.answers[me] = { name: username, text: clean };
+
+      if (m.answers[me] && m.answers[partner]) {
+        m.revealed = true;
+        const a1 = m.answers[me].text.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const a2 = m.answers[partner].text.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const isMatch = Boolean(a1 && a2 && (a1 === a2 || a1.includes(a2) || a2.includes(a1)));
+        m.matched = isMatch;
+        m.streak = isMatch ? m.streak + 1 : 0;
+      }
+
+      emitToUser(username, 'mind-state', getPublicMindState(username));
+      if (isUserOnline(to)) emitToUser(to, 'mind-state', getPublicMindState(to));
+    } catch (err) {
+      console.error('mind-submit error:', err);
+    }
   });
 
-  socket.on('yt-sync', async ({ to, videoId, action, timeSec }) => {
-    if (!to) return;
-    if (!(await areFriends(username, to))) return;
-    const payload = {
-      from: username,
-      videoId: videoId || null,
-      action: action || 'load',
-      timeSec: typeof timeSec === 'number' ? timeSec : 0
-    };
-    emitToUser(username, 'yt-sync', payload);
-    if (isUserOnline(to)) emitToUser(to, 'yt-sync', payload);
+  socket.on('mind-next', async ({ to, promptIndex, customPrompt } = {}) => {
+    try {
+      if (!to || !(await areFriends(username, to))) return;
+      const m = serverGameState.mind;
+      m.answers = {};
+      m.revealed = false;
+      m.matched = false;
+      if (customPrompt && String(customPrompt).trim()) {
+        m.customPrompt = String(customPrompt).trim().slice(0, 90);
+      } else {
+        m.customPrompt = null;
+        m.promptIndex = typeof promptIndex === 'number' ? promptIndex : m.promptIndex + 1;
+      }
+
+      emitToUser(username, 'mind-state', getPublicMindState(username));
+      if (isUserOnline(to)) emitToUser(to, 'mind-state', getPublicMindState(to));
+    } catch (err) {
+      console.error('mind-next error:', err);
+    }
   });
 
-  socket.on('mark-seen', async ({ friend }) => {
+  // -------- 3. EMOJI ROCK-PAPER-SCISSORS (BEST OF 5) --------
+
+  socket.on('rps-pick', async ({ to, move } = {}) => {
+    try {
+      if (!to || !['rock', 'paper', 'scissors'].includes(move)) return;
+      if (!(await areFriends(username, to))) return;
+
+      const r = serverGameState.rps;
+      if (r.matchWinner) return;
+
+      const me = username.toLowerCase();
+      const partner = to.toLowerCase();
+      r.picks[me] = move;
+
+      if (r.picks[me] && r.picks[partner]) {
+        const m1 = r.picks[me];
+        const m2 = r.picks[partner];
+        let roundWinner = null;
+        let resultText = "It's a tie!";
+
+        if (m1 !== m2) {
+          const meWins =
+            (m1 === 'rock' && m2 === 'scissors') ||
+            (m1 === 'paper' && m2 === 'rock') ||
+            (m1 === 'scissors' && m2 === 'paper');
+          roundWinner = meWins ? me : partner;
+          r.scores[roundWinner] = (r.scores[roundWinner] || 0) + 1;
+          resultText = `${meWins ? username : to} won Round ${r.round}!`;
+          if (r.scores[roundWinner] >= 3) {
+            r.matchWinner = roundWinner;
+            resultText = `${meWins ? username : to} won the Best-of-5 match!`;
+          }
+        }
+
+        r.lastResult = {
+          picks: { [me]: m1, [partner]: m2 },
+          winnerUser: roundWinner,
+          text: resultText
+        };
+        r.picks = {};
+        r.round += 1;
+      }
+
+      emitToUser(username, 'rps-state', getPublicRpsState(username));
+      if (isUserOnline(to)) emitToUser(to, 'rps-state', getPublicRpsState(to));
+    } catch (err) {
+      console.error('rps-pick error:', err);
+    }
+  });
+
+  socket.on('rps-reset', async ({ to } = {}) => {
+    try {
+      if (!to || !(await areFriends(username, to))) return;
+      serverGameState.rps = {
+        round: 1,
+        picks: {},
+        scores: {},
+        lastResult: null,
+        matchWinner: null
+      };
+      emitToUser(username, 'rps-state', getPublicRpsState(username));
+      if (isUserOnline(to)) emitToUser(to, 'rps-state', getPublicRpsState(to));
+    } catch (err) {
+      console.error('rps-reset error:', err);
+    }
+  });
+
+  // -------- 4. 30-SECOND HEART CATCH BATTLE --------
+
+  socket.on('catch-start', async ({ to } = {}) => {
+    try {
+      if (!to || !(await areFriends(username, to))) return;
+      if (catchTimerHandle) clearTimeout(catchTimerHandle);
+
+      const me = username.toLowerCase();
+      const partner = to.toLowerCase();
+      serverGameState.catchGame = {
+        active: true,
+        endTime: Date.now() + 30000,
+        scores: { [me]: 0, [partner]: 0 },
+        winnerUser: null
+      };
+
+      emitToUser(username, 'catch-state', serverGameState.catchGame);
+      if (isUserOnline(to)) emitToUser(to, 'catch-state', serverGameState.catchGame);
+
+      catchTimerHandle = setTimeout(() => {
+        const cg = serverGameState.catchGame;
+        cg.active = false;
+        const s1 = cg.scores[me] || 0;
+        const s2 = cg.scores[partner] || 0;
+        cg.winnerUser = s1 === s2 ? 'draw' : (s1 > s2 ? me : partner);
+        emitToUser(username, 'catch-state', cg);
+        if (isUserOnline(to)) emitToUser(to, 'catch-state', cg);
+        catchTimerHandle = null;
+      }, 30500);
+    } catch (err) {
+      console.error('catch-start error:', err);
+    }
+  });
+
+  socket.on('catch-score', async ({ to, delta } = {}) => {
+    try {
+      if (!to || ![1, 2, -1].includes(delta)) return;
+      if (!(await areFriends(username, to))) return;
+      const cg = serverGameState.catchGame;
+      if (!cg.active || Date.now() > cg.endTime + 500) return;
+
+      const me = username.toLowerCase();
+      cg.scores[me] = Math.max(0, (cg.scores[me] || 0) + delta);
+
+      emitToUser(username, 'catch-state', cg);
+      if (isUserOnline(to)) emitToUser(to, 'catch-state', cg);
+    } catch (err) {
+      console.error('catch-score error:', err);
+    }
+  });
+
+  // -------- 5. WATCH TOGETHER + LIVE REACTIONS --------
+
+  socket.on('yt-sync', async ({ to, videoId, action, timeSec } = {}) => {
+    try {
+      if (!to || !(await areFriends(username, to))) return;
+      if (videoId && /^[a-zA-Z0-9_-]{11}$/.test(String(videoId))) {
+        serverGameState.ytVideoId = String(videoId);
+      }
+      const payload = {
+        from: username,
+        videoId: serverGameState.ytVideoId,
+        action: action || 'load',
+        timeSec: typeof timeSec === 'number' ? timeSec : 0
+      };
+      emitToUser(username, 'yt-sync', payload);
+      if (isUserOnline(to)) emitToUser(to, 'yt-sync', payload);
+    } catch (err) {
+      console.error('yt-sync error:', err);
+    }
+  });
+
+  socket.on('watch-reaction', async ({ to, emoji } = {}) => {
+    try {
+      if (!to || !ALLOWED_REACTIONS.includes(emoji)) return;
+      if (!(await areFriends(username, to))) return;
+      const payload = { from: username, emoji };
+      emitToUser(username, 'watch-reaction', payload);
+      if (isUserOnline(to)) emitToUser(to, 'watch-reaction', payload);
+    } catch (err) {
+      console.error('watch-reaction error:', err);
+    }
+  });
+
+  // -------- 6. SHARED LIVE DOODLE CANVAS --------
+
+  socket.on('doodle-draw', async ({ to, segment } = {}) => {
+    try {
+      if (!to || !segment || typeof segment.x0 !== 'number' || typeof segment.y0 !== 'number') return;
+      if (!(await areFriends(username, to))) return;
+
+      const safeSeg = {
+        x0: Math.max(0, Math.min(1, segment.x0)),
+        y0: Math.max(0, Math.min(1, segment.y0)),
+        x1: Math.max(0, Math.min(1, segment.x1)),
+        y1: Math.max(0, Math.min(1, segment.y1)),
+        color: String(segment.color || '#38bdf8').slice(0, 20),
+        size: Math.max(1, Math.min(20, Number(segment.size) || 4))
+      };
+
+      serverGameState.doodleStrokes.push(safeSeg);
+      if (serverGameState.doodleStrokes.length > 2500) {
+        serverGameState.doodleStrokes.splice(0, 500);
+      }
+
+      if (isUserOnline(to)) {
+        emitToUser(to, 'doodle-draw', safeSeg);
+      }
+    } catch (err) {
+      console.error('doodle-draw error:', err);
+    }
+  });
+
+  socket.on('doodle-clear', async ({ to } = {}) => {
+    try {
+      if (!to || !(await areFriends(username, to))) return;
+      serverGameState.doodleStrokes = [];
+      emitToUser(username, 'doodle-clear', { from: username });
+      if (isUserOnline(to)) emitToUser(to, 'doodle-clear', { from: username });
+    } catch (err) {
+      console.error('doodle-clear error:', err);
+    }
+  });
+
+  // -------- READ RECEIPTS, TYPING, REACTIONS & MESSAGE OPS --------
+
+  socket.on('mark-seen', async ({ friend } = {}) => {
     if (!friend) return;
     try {
       if (useDB) {
@@ -1015,26 +1763,33 @@ io.on('connection', async (socket) => {
     }
   });
 
-  socket.on('typing', ({ to }) => {
+  socket.on('typing', ({ to } = {}) => {
     if (to && isUserOnline(to)) emitToUser(to, 'typing', { from: username });
   });
 
-  socket.on('stop-typing', ({ to }) => {
+  socket.on('stop-typing', ({ to } = {}) => {
     if (to && isUserOnline(to)) emitToUser(to, 'stop-typing', { from: username });
   });
 
-  socket.on('react-message', async ({ id, friend }) => {
+  socket.on('react-message', async ({ id, friend } = {}) => {
     if (!id) return;
     try {
       if (useDB) {
-        const cur = await pool.query('SELECT reaction FROM messages WHERE id = $1', [id]);
+        const cur = await pool.query(
+          `SELECT reaction FROM messages
+           WHERE id = $1 AND (LOWER(username) = LOWER($2) OR LOWER(recipient) = LOWER($2))`,
+          [id, username]
+        );
         if (cur.rows.length === 0) return;
         const nextReaction = cur.rows[0].reaction ? null : '❤️';
         await pool.query('UPDATE messages SET reaction = $1 WHERE id = $2', [nextReaction, id]);
         emitToUser(username, 'message-reacted', { id, reaction: nextReaction });
         if (friend && isUserOnline(friend)) emitToUser(friend, 'message-reacted', { id, reaction: nextReaction });
       } else {
-        const msg = memoryMessages.find(m => String(m.id) === String(id));
+        const msg = memoryMessages.find(
+          m => String(m.id) === String(id) &&
+               (m.username.toLowerCase() === username.toLowerCase() || m.recipient.toLowerCase() === username.toLowerCase())
+        );
         if (!msg) return;
         msg.reaction = msg.reaction ? null : '❤️';
         emitToUser(username, 'message-reacted', { id, reaction: msg.reaction });
@@ -1045,7 +1800,7 @@ io.on('connection', async (socket) => {
     }
   });
 
-  socket.on('delete-message', async ({ id, friend }) => {
+  socket.on('delete-message', async ({ id, friend } = {}) => {
     if (!id) return;
     try {
       if (useDB) {
@@ -1055,7 +1810,7 @@ io.on('connection', async (socket) => {
         );
         if (res.rows.length > 0) {
           emitToUser(username, 'message-deleted', id);
-          if (friend) emitToUser(friend, 'message-deleted', id);
+          if (friend && isUserOnline(friend)) emitToUser(friend, 'message-deleted', id);
         }
       } else {
         const idx = memoryMessages.findIndex(
@@ -1064,7 +1819,7 @@ io.on('connection', async (socket) => {
         if (idx !== -1) {
           memoryMessages.splice(idx, 1);
           emitToUser(username, 'message-deleted', id);
-          if (friend) emitToUser(friend, 'message-deleted', id);
+          if (friend && isUserOnline(friend)) emitToUser(friend, 'message-deleted', id);
         }
       }
     } catch (err) {
@@ -1072,7 +1827,7 @@ io.on('connection', async (socket) => {
     }
   });
 
-  socket.on('clear-chat', async ({ friend }) => {
+  socket.on('clear-chat', async ({ friend } = {}) => {
     if (!friend) return;
     try {
       const allowed = await areFriends(username, friend);
@@ -1103,42 +1858,47 @@ io.on('connection', async (socket) => {
     }
   });
 
-  // WebRTC Signaling
-  socket.on('call-user', async ({ to, offer, isVideo }) => {
-    if (!to || !offer) return;
-    const allowed = await areFriends(username, to);
-    if (!allowed) return;
+  // -------- WEBRTC SIGNALING --------
 
-    sendPushNotification(to, {
-      title: `Incoming ${isVideo ? 'Video' : 'Voice'} Call`,
-      body: `${username} is calling you`,
-      tag: 'incoming-call'
-    });
+  socket.on('call-user', async ({ to, offer, isVideo } = {}) => {
+    try {
+      if (!to || !offer) return;
+      const allowed = await areFriends(username, to);
+      if (!allowed) return;
 
-    if (!isUserOnline(to)) {
-      socket.emit('call-error', { message: `${to} is currently offline.` });
-      return;
+      sendPushNotification(to, {
+        title: `Incoming ${isVideo ? 'Video' : 'Voice'} Call`,
+        body: `${username} is calling you`,
+        tag: 'incoming-call'
+      });
+
+      if (!isUserOnline(to)) {
+        socket.emit('call-error', { message: `${to} is currently offline.` });
+        return;
+      }
+      emitToUser(to, 'incoming-call', { from: username, offer, isVideo: Boolean(isVideo) });
+    } catch (err) {
+      console.error('call-user error:', err);
     }
-    emitToUser(to, 'incoming-call', { from: username, offer, isVideo: Boolean(isVideo) });
   });
 
-  socket.on('make-answer', ({ to, answer }) => {
+  socket.on('make-answer', ({ to, answer } = {}) => {
     if (to && answer) emitToUser(to, 'call-answered', { from: username, answer });
   });
 
-  socket.on('ice-candidate', ({ to, candidate }) => {
+  socket.on('ice-candidate', ({ to, candidate } = {}) => {
     if (to && candidate) emitToUser(to, 'ice-candidate', { from: username, candidate });
   });
 
-  socket.on('call-media-state', ({ to, micEnabled, camEnabled }) => {
+  socket.on('call-media-state', ({ to, micEnabled, camEnabled } = {}) => {
     if (to) emitToUser(to, 'call-media-state', { from: username, micEnabled, camEnabled });
   });
 
-  socket.on('reject-call', ({ to }) => {
+  socket.on('reject-call', ({ to } = {}) => {
     if (to) emitToUser(to, 'call-rejected', { from: username });
   });
 
-  socket.on('end-call', ({ to }) => {
+  socket.on('end-call', ({ to } = {}) => {
     if (to) emitToUser(to, 'call-ended', { from: username });
   });
 
@@ -1156,6 +1916,8 @@ io.on('connection', async (socket) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+initDB().finally(() => {
+  server.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
 });

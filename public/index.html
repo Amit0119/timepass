@@ -42,7 +42,7 @@
       <div class="auth-brand">
         <div class="brand-logo">💖</div>
         <h1>MINI-WORLD</h1>
-        <p class="auth-subtitle">Private 1-on-1 Chat &amp; Calling</p>
+        <p class="auth-subtitle">DUDU (moti) BUBU</p>
       </div>
 
       <div id="auth-tabs-box" class="auth-tabs">
@@ -174,14 +174,14 @@
       </header>
 
       <div class="welcome-banner">
-        <span>✨ Private 1-on-1 Space • Chat, Games &amp; Watch Together ✨</span>
+        <span>DUDU🍼😊 (moti) BUBU🐵</span>
       </div>
 
       <div id="messages-container" class="messages-container">
         <div id="empty-chat-state" class="empty-chat-state glass-panel">
           <div class="empty-icon">💌</div>
           <h3>Our Private Space</h3>
-          <p style="font-size:0.8rem;color:var(--text-muted);margin-top:6px;">Messages, calls, games, and synced movies for two.</p>
+          <p style="font-size:0.8rem;color:var(--text-muted);margin-top:6px;">Messages, calls, games, doodles, and movies for two.</p>
           <button type="button" id="empty-open-menu-btn" class="primary-btn" style="margin-top:14px;">Open Chat</button>
         </div>
 
@@ -266,54 +266,239 @@
     </main>
   </div>
 
-  <!-- FULL-SCREEN GAME MODE MODAL (SKY-BLUE ANIMATED BACKGROUND) -->
+  <!-- FULL-SCREEN GAME MODE MODAL (SKY-BLUE ANIMATED BACKGROUND + DUDU-BUBU STAGE) -->
   <div id="game-mode-modal" class="modal-overlay fullscreen-modal-overlay" style="display: none;">
     <div class="game-mode-card sky-game-theme fullscreen-game-card">
+      <!-- Animated Sky-Blue Orbs + Live Canvas -->
       <div class="sky-ambient-bg" aria-hidden="true">
         <div class="sky-orb sky-orb-1"></div>
         <div class="sky-orb sky-orb-2"></div>
         <div class="sky-orb sky-orb-3"></div>
         <canvas id="game-mode-canvas"></canvas>
+
+        <!-- DUDU-BUBU CUTE FIGHTING & PLAYING CARTOON STAGE -->
+        <div id="dudu-bubu-stage" class="dudu-bubu-stage action-bonk">
+          <div class="dudu-bubu-track">
+            <!-- Dudu (Cute Chubby Brown Bear) -->
+            <div class="bear-actor bear-dudu">
+              <svg class="bear-svg" viewBox="0 0 110 110" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="28" cy="24" r="12" fill="#8d5b3c"/>
+                <circle cx="28" cy="24" r="6" fill="#c79575"/>
+                <circle cx="82" cy="24" r="12" fill="#8d5b3c"/>
+                <circle cx="82" cy="24" r="6" fill="#c79575"/>
+                <ellipse cx="55" cy="78" rx="30" ry="24" fill="#8d5b3c"/>
+                <ellipse cx="55" cy="80" rx="18" ry="15" fill="#d9b398"/>
+                <ellipse cx="55" cy="46" rx="34" ry="29" fill="#8d5b3c"/>
+                <ellipse cx="55" cy="54" rx="12" ry="9" fill="#f3dfc9"/>
+                <ellipse cx="55" cy="51" rx="4.5" ry="3.2" fill="#3a2013"/>
+                <path d="M51 56 Q55 60 59 56" fill="none" stroke="#3a2013" stroke-width="2.2" stroke-linecap="round"/>
+                <circle class="bear-eye" cx="40" cy="45" r="3.6" fill="#1f110a"/>
+                <circle class="bear-eye" cx="70" cy="45" r="3.6" fill="#1f110a"/>
+                <ellipse cx="32" cy="52" rx="5.5" ry="3" fill="#ff8fab" opacity="0.72"/>
+                <ellipse cx="78" cy="52" rx="5.5" ry="3" fill="#ff8fab" opacity="0.72"/>
+                <ellipse class="dudu-arm-left" cx="26" cy="74" rx="10" ry="7" fill="#7c4d31"/>
+                <g class="dudu-arm-right">
+                  <ellipse cx="84" cy="70" rx="11" ry="7.5" fill="#7c4d31"/>
+                  <rect class="dudu-pillow" x="86" y="48" width="18" height="22" rx="8" fill="#e0f2fe" stroke="#38bdf8" stroke-width="2"/>
+                </g>
+                <ellipse cx="40" cy="99" rx="10" ry="6" fill="#7c4d31"/>
+                <ellipse cx="70" cy="99" rx="10" ry="6" fill="#7c4d31"/>
+              </svg>
+            </div>
+
+            <div id="dudu-bubu-fx" class="dudu-bubu-fx">💥</div>
+
+            <!-- Bubu (Cute Chubby White Panda-Bear) -->
+            <div class="bear-actor bear-bubu">
+              <svg class="bear-svg" viewBox="0 0 110 110" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="28" cy="24" r="12" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+                <circle cx="28" cy="24" r="6" fill="#fecdd3"/>
+                <circle cx="82" cy="24" r="12" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+                <circle cx="82" cy="24" r="6" fill="#fecdd3"/>
+                <ellipse cx="55" cy="78" rx="30" ry="24" fill="#ffffff" stroke="#e2e8f0" stroke-width="2"/>
+                <ellipse cx="55" cy="80" rx="17" ry="14" fill="#fce7f3"/>
+                <ellipse cx="55" cy="46" rx="34" ry="29" fill="#ffffff" stroke="#e2e8f0" stroke-width="2"/>
+                <ellipse cx="55" cy="51" rx="4.2" ry="3" fill="#334155"/>
+                <path d="M51 56 Q55 60 59 56" fill="none" stroke="#334155" stroke-width="2.2" stroke-linecap="round"/>
+                <circle class="bear-eye" cx="40" cy="45" r="3.6" fill="#0f172a"/>
+                <circle class="bear-eye" cx="70" cy="45" r="3.6" fill="#0f172a"/>
+                <ellipse cx="32" cy="52" rx="6" ry="3.2" fill="#f472b6" opacity="0.72"/>
+                <ellipse cx="78" cy="52" rx="6" ry="3.2" fill="#f472b6" opacity="0.72"/>
+                <g class="bubu-arm-left">
+                  <ellipse cx="26" cy="70" rx="11" ry="7.5" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.5"/>
+                  <circle class="bubu-heart-throw" cx="15" cy="58" r="7" fill="#38bdf8" opacity="0.85"/>
+                </g>
+                <ellipse class="bubu-arm-right" cx="84" cy="74" rx="10" ry="7" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.5"/>
+                <ellipse cx="40" cy="99" rx="10" ry="6" fill="#e2e8f0"/>
+                <ellipse cx="70" cy="99" rx="10" ry="6" fill="#e2e8f0"/>
+              </svg>
+            </div>
+          </div>
+        </div>
       </div>
 
+      <!-- Game Mode Header -->
       <div class="settings-header game-foreground">
         <div class="game-mode-heading-wrap">
           <span class="game-mode-kicker">Mode</span>
           <h3>🎮 Game Mode</h3>
         </div>
-        <button type="button" id="close-game-mode-btn" class="icon-btn">✕</button>
+        <div class="game-header-right">
+          <button type="button" id="stop-game-audio-btn" class="mini-btn decline" style="display: none;" title="Stop Song">🔇 Stop</button>
+          <button type="button" id="dudu-action-btn" class="mini-btn sky-pill-btn" title="Change Dudu-Bubu Action">🐻 Bonk!</button>
+          <button type="button" id="close-game-mode-btn" class="icon-btn">✕</button>
+        </div>
       </div>
 
+      <!-- Mobile-Scrollable 6-Tab Navigation -->
       <div class="game-mode-tabs game-foreground">
-        <button type="button" class="game-tab active" data-gtab="ttt">Tic-Tac-Toe</button>
-        <button type="button" class="game-tab" data-gtab="wyr">Would You Rather</button>
-        <button type="button" class="game-tab" data-gtab="watch">Watch Together</button>
+        <button type="button" class="game-tab active" data-gtab="ttt">🎯 Tic-Tac-Toe</button>
+        <button type="button" class="game-tab" data-gtab="mind">🧠 Mind Sync</button>
+        <button type="button" class="game-tab" data-gtab="rps">✊ RPS</button>
+        <button type="button" class="game-tab" data-gtab="catch">🐾 Heart Catch</button>
+        <button type="button" class="game-tab" data-gtab="watch">🎬 Watch</button>
+        <button type="button" class="game-tab" data-gtab="doodle">🎨 Doodle</button>
       </div>
 
+      <!-- Game Panels Container -->
       <div class="game-mode-body fullscreen-game-body game-foreground">
-        <!-- 1. TIC-TAC-TOE -->
+
+        <!-- 1. UPGRADED TIC-TAC-TOE -->
         <div id="gtab-ttt" class="game-panel active">
-          <p id="ttt-role-hint" class="game-hint">Player 1: ❤️ • Player 2: ✨</p>
+          <div class="score-strip">
+            <div class="score-pill">
+              <span id="ttt-score-me-label">You</span>
+              <strong id="ttt-score-me">0</strong>
+            </div>
+            <span class="score-vs">VS</span>
+            <div class="score-pill">
+              <span id="ttt-score-partner-label">Partner</span>
+              <strong id="ttt-score-partner">0</strong>
+            </div>
+          </div>
+
+          <div class="emoji-picker-wrap">
+            <span class="picker-label">Your Emoji:</span>
+            <div id="ttt-emoji-picker" class="emoji-picker-row">
+              <button type="button" class="emoji-choice-btn" data-emoji="❤️">❤️</button>
+              <button type="button" class="emoji-choice-btn" data-emoji="✨">✨</button>
+              <button type="button" class="emoji-choice-btn" data-emoji="🐱">🐱</button>
+              <button type="button" class="emoji-choice-btn" data-emoji="👑">👑</button>
+              <button type="button" class="emoji-choice-btn" data-emoji="🔥">🔥</button>
+              <button type="button" class="emoji-choice-btn" data-emoji="🦋">🦋</button>
+              <button type="button" class="emoji-choice-btn" data-emoji="🍕">🍕</button>
+              <button type="button" class="emoji-choice-btn" data-emoji="🐼">🐼</button>
+            </div>
+          </div>
+
+          <p id="ttt-role-hint" class="game-hint">You: ❤️ • Partner: ✨</p>
           <div id="ttt-status" class="game-status-banner">Turn: ❤️</div>
           <div id="ttt-board" class="ttt-board"></div>
-          <button type="button" id="ttt-reset-btn" class="primary-btn small-btn" style="margin-top:14px;max-width:240px;margin-left:auto;margin-right:auto;display:block;">Restart Match</button>
-        </div>
 
-        <!-- 2. WOULD YOU RATHER -->
-        <div id="gtab-wyr" class="game-panel">
-          <p class="game-hint">Pick your choice and see if you match</p>
-          <div id="wyr-question" class="wyr-question"></div>
-          <div class="wyr-choices">
-            <button type="button" id="wyr-opt-a" class="wyr-choice-btn"></button>
-            <button type="button" id="wyr-opt-b" class="wyr-choice-btn"></button>
+          <div id="ttt-dare-card" class="dare-card" style="display: none;">
+            <span class="dare-badge">🎁 Winner Dare</span>
+            <p id="ttt-dare-text"></p>
           </div>
-          <div id="wyr-picks-info" class="wyr-picks-info"></div>
-          <button type="button" id="wyr-next-btn" class="mini-btn primary" style="width:100%;max-width:360px;margin:12px auto 0;display:block;">Next Question →</button>
+
+          <div class="game-action-row">
+            <button type="button" id="ttt-reset-btn" class="primary-btn small-btn">New Round</button>
+            <button type="button" id="ttt-reset-scores-btn" class="mini-btn">Reset Score</button>
+          </div>
         </div>
 
-        <!-- 3. WATCH TOGETHER (NORMAL YOUTUBE PLAYER) -->
+        <!-- 2. MIND SYNC (TELEPATHY TEST) -->
+        <div id="gtab-mind" class="game-panel">
+          <div class="mind-top-bar">
+            <span id="mind-streak-badge" class="streak-pill">🔥 Telepathy Streak: 0</span>
+          </div>
+
+          <div class="mind-prompt-card">
+            <span class="mind-prompt-label">Think of the same answer!</span>
+            <h4 id="mind-prompt-text">Loading question...</h4>
+          </div>
+
+          <form id="mind-form" class="mind-input-row">
+            <input type="text" id="mind-answer-input" placeholder="Type your secret answer..." maxlength="60" required />
+            <button type="submit" id="mind-lock-btn" class="mini-btn primary">Lock 🔒</button>
+          </form>
+
+          <div id="mind-status-text" class="game-status-banner">Type an answer to lock it in</div>
+          <div id="mind-reveal-area" class="mind-reveal-grid"></div>
+
+          <div class="mind-custom-row">
+            <input type="text" id="mind-custom-prompt-input" placeholder="Or ask your own custom question..." maxlength="90" />
+            <button type="button" id="mind-custom-send-btn" class="mini-btn">Ask</button>
+          </div>
+
+          <button type="button" id="mind-next-btn" class="primary-btn small-btn" style="max-width:320px;margin:10px auto 0;display:block;">Next Prompt →</button>
+        </div>
+
+        <!-- 3. EMOJI ROCK-PAPER-SCISSORS (BEST OF 5) -->
+        <div id="gtab-rps" class="game-panel">
+          <div class="score-strip">
+            <div class="score-pill">
+              <span id="rps-me-label">You</span>
+              <strong id="rps-score-me">0</strong>
+            </div>
+            <span id="rps-round-label" class="score-vs">Round 1</span>
+            <div class="score-pill">
+              <span id="rps-partner-label">Partner</span>
+              <strong id="rps-score-partner">0</strong>
+            </div>
+          </div>
+
+          <p class="game-hint">First to 3 wins! Secretly pick your move</p>
+
+          <div class="rps-arena">
+            <div class="rps-fighter">
+              <div id="rps-arena-me" class="rps-fist">❓</div>
+              <span>You</span>
+            </div>
+            <div class="rps-vs-badge">⚡</div>
+            <div class="rps-fighter">
+              <div id="rps-arena-partner" class="rps-fist">❓</div>
+              <span id="rps-partner-name">Partner</span>
+            </div>
+          </div>
+
+          <div id="rps-result-banner" class="game-status-banner">Choose Rock, Paper, or Scissors</div>
+
+          <div class="rps-buttons-row">
+            <button type="button" class="rps-move-btn" data-move="rock"><span>✊</span><small>Rock</small></button>
+            <button type="button" class="rps-move-btn" data-move="paper"><span>✋</span><small>Paper</small></button>
+            <button type="button" class="rps-move-btn" data-move="scissors"><span>✌️</span><small>Scissors</small></button>
+          </div>
+
+          <button type="button" id="rps-reset-btn" class="mini-btn" style="display:block;margin:12px auto 0;">Reset RPS Match</button>
+        </div>
+
+        <!-- 4. 30-SECOND HEART CATCH BATTLE -->
+        <div id="gtab-catch" class="game-panel">
+          <div class="score-strip">
+            <div class="score-pill">
+              <span>You</span>
+              <strong id="catch-score-me">0</strong>
+            </div>
+            <div class="catch-timer-pill">⏱️ <span id="catch-timer">30</span>s</div>
+            <div class="score-pill">
+              <span id="catch-partner-label">Partner</span>
+              <strong id="catch-score-partner">0</strong>
+            </div>
+          </div>
+
+          <p class="game-hint">Tap 💖/🐱 (+1), 🌟 (+2), avoid 🌶️ (-1)!</p>
+
+          <div id="catch-arena" class="catch-arena">
+            <div id="catch-overlay" class="catch-overlay">
+              <p id="catch-status-msg">Ready for a 30-second reflex battle?</p>
+              <button type="button" id="catch-start-btn" class="primary-btn small-btn" style="max-width:190px;">Start Battle 🚀</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 5. WATCH TOGETHER + LIVE REACTIONS -->
         <div id="gtab-watch" class="game-panel">
-          <p class="game-hint">Paste any YouTube link to watch together</p>
+          <p class="game-hint">Paste any YouTube link &amp; send live reactions while watching</p>
           <form id="yt-load-form" class="yt-load-row">
             <input type="text" id="yt-url-input" placeholder="Paste YouTube link or video ID" required />
             <button type="submit" class="mini-btn primary">Load</button>
@@ -327,8 +512,43 @@
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
               allowfullscreen
             ></iframe>
+            <div id="watch-reaction-stage" class="watch-reaction-stage"></div>
+          </div>
+
+          <div class="watch-reaction-bar">
+            <button type="button" class="watch-react-btn" data-emoji="😂">😂</button>
+            <button type="button" class="watch-react-btn" data-emoji="😭">😭</button>
+            <button type="button" class="watch-react-btn" data-emoji="❤️">❤️</button>
+            <button type="button" class="watch-react-btn" data-emoji="🤯">🤯</button>
+            <button type="button" class="watch-react-btn" data-emoji="🔥">🔥</button>
+            <button type="button" class="watch-react-btn" data-emoji="🍿">🍿</button>
           </div>
         </div>
+
+        <!-- 6. SHARED LIVE DOODLE CANVAS -->
+        <div id="gtab-doodle" class="game-panel">
+          <p class="game-hint">Draw together live — strokes appear on both screens instantly</p>
+
+          <div class="doodle-toolbar">
+            <div class="doodle-colors">
+              <button type="button" class="doodle-color-btn active" data-color="#38bdf8" style="background:#38bdf8;" aria-label="Sky Blue"></button>
+              <button type="button" class="doodle-color-btn" data-color="#f472b6" style="background:#f472b6;" aria-label="Pink"></button>
+              <button type="button" class="doodle-color-btn" data-color="#fde047" style="background:#fde047;" aria-label="Yellow"></button>
+              <button type="button" class="doodle-color-btn" data-color="#34d399" style="background:#34d399;" aria-label="Mint"></button>
+              <button type="button" class="doodle-color-btn" data-color="#ffffff" style="background:#ffffff;" aria-label="White"></button>
+              <button type="button" class="doodle-color-btn" data-color="#f87171" style="background:#f87171;" aria-label="Red"></button>
+            </div>
+            <div class="doodle-tools-right">
+              <input type="range" id="doodle-size" min="2" max="14" value="4" title="Brush Size" />
+              <button type="button" id="doodle-clear-btn" class="mini-btn decline">Clear</button>
+            </div>
+          </div>
+
+          <div class="doodle-canvas-wrap">
+            <canvas id="doodle-canvas"></canvas>
+          </div>
+        </div>
+
       </div>
     </div>
   </div>
@@ -366,6 +586,37 @@
               <div class="setting-desc" id="push-status-desc">Receive alerts even when browser is closed</div>
             </div>
             <button type="button" id="enable-push-btn" class="mini-btn primary">Enable</button>
+          </div>
+        </div>
+
+        <!-- SHARED CUSTOM GAME SONGS (SYNCED FOR BOTH PLAYERS) -->
+        <div class="settings-section">
+          <h4>Custom Game Songs (Both Players Hear It)</h4>
+          <p class="setting-desc" style="margin-bottom:8px;">Upload any MP3/audio clip (max 5 MB). Whoever sets it, both players will hear it when a game ends (plays 12s from Start Sec).</p>
+          <div id="game-audio-feedback" class="auth-feedback" style="display: none;"></div>
+
+          <div class="cp-form">
+            <!-- Win Song -->
+            <label class="speech-label" for="win-song-file">🏆 Win Song</label>
+            <div id="win-song-status" class="setting-desc">Default victory fanfare</div>
+            <input type="file" id="win-song-file" accept="audio/*" style="height:auto;padding:7px 10px;font-size:0.78rem;" />
+            <div class="speech-input-row">
+              <input type="number" id="win-song-start" min="0" max="3600" placeholder="Start sec (e.g. 30)" />
+              <button type="button" id="upload-win-song-btn" class="mini-btn primary">Save</button>
+              <button type="button" id="test-win-song-btn" class="mini-btn accept" title="Preview Win Song">▶</button>
+              <button type="button" id="clear-win-song-btn" class="mini-btn decline" title="Remove Win Song">✕</button>
+            </div>
+
+            <!-- Lose Song -->
+            <label class="speech-label" for="lose-song-file" style="margin-top:8px;">😜 Lose / Funny Song (Optional)</label>
+            <div id="lose-song-status" class="setting-desc">Plays Win Song (or default sad trombone)</div>
+            <input type="file" id="lose-song-file" accept="audio/*" style="height:auto;padding:7px 10px;font-size:0.78rem;" />
+            <div class="speech-input-row">
+              <input type="number" id="lose-song-start" min="0" max="3600" placeholder="Start sec (e.g. 10)" />
+              <button type="button" id="upload-lose-song-btn" class="mini-btn primary">Save</button>
+              <button type="button" id="test-lose-song-btn" class="mini-btn accept" title="Preview Lose Song">▶</button>
+              <button type="button" id="clear-lose-song-btn" class="mini-btn decline" title="Remove Lose Song">✕</button>
+            </div>
           </div>
         </div>
 
