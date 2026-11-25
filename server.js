@@ -41,6 +41,7 @@ const memoryUsers = [];
 const memoryFriendships = [];
 const memoryMessages = [];
 const memorySubscriptions = new Map();
+const memoryMedia = new Map();
 let msgIdCounter = 1;
 
 const MASTER_RECOVERY_PIN = process.env.MASTER_RECOVERY_PIN || '0119';
@@ -48,7 +49,7 @@ const LOCAL_VAPID_FILE = path.join(__dirname, '.vapid.json');
 let vapidKeys = null;
 let tokenSecret = process.env.TOKEN_SECRET || crypto.randomBytes(32).toString('hex');
 
-// ================= SHARED CUSTOM GAME SONGS STORE (SYNCED FOR BOTH USERS) =================
+// ================= SHARED CUSTOM GAME SONGS STORE =================
 
 const gameAudioStore = {
   win: { buffer: null, mime: null, name: null, setBy: null, startSec: 0, updatedAt: 0 },
@@ -90,6 +91,82 @@ function broadcastGameAudioMeta(notifyText = null) {
   }
 }
 
+// ================= SHARED EXTRAS (THEMES, INDEPENDENT PET NAMES, STICKY, HANDS, CHAOS) =================
+
+const ALLOWED_THEMES = ['rose', 'rain', 'galaxy', 'sakura', 'sunset'];
+
+const sharedExtras = {
+  theme: 'rose',
+  chaosMode: false,
+  handsHolding: {},
+  pet: {
+    names: {}, // Each user keeps their own independent pet name (lowerUsername -> custom name)
+    level: 1,
+    xp: 0,
+    hunger: 82,
+    happiness: 86,
+    streak: 1,
+    lastFedDate: null,
+    lastInteraction: Date.now()
+  },
+  sticky: {
+    note: 'Drink water & smile today! 💖',
+    updatedBy: 'MINI-WORLD',
+    countdownTitle: '',
+    countdownDate: ''
+  }
+};
+
+function getComputedPetState(forUsername = '') {
+  const p = sharedExtras.pet;
+  if (!p.names || typeof p.names !== 'object') p.names = {};
+
+  const now = Date.now();
+  const hoursPassed = Math.max(0, (now - (p.lastInteraction || now)) / (1000 * 60 * 60));
+  const hunger = Math.max(10, Math.round(p.hunger - hoursPassed * 2.5));
+  const happiness = Math.max(10, Math.round(p.happiness - hoursPassed * 2.0));
+
+  let mood = 'happy';
+  if (hunger <= 30) mood = 'hungry';
+  else if (happiness <= 35) mood = 'grumpy';
+  else if (hoursPassed > 8) mood = 'sleepy';
+
+  const me = String(forUsername || '').toLowerCase();
+  const myPetName = (me && p.names[me]) ? p.names[me] : 'Mochi';
+
+  return {
+    name: myPetName,
+    names: { ...p.names },
+    level: p.level,
+    xp: p.xp,
+    hunger,
+    happiness,
+    streak: p.streak,
+    mood
+  };
+}
+
+async function persistAppConfig(key, obj) {
+  if (!useDB) return;
+  try {
+    await pool.query(
+      `INSERT INTO app_config (key, value)
+       VALUES ($1, $2)
+       ON CONFLICT (key) DO UPDATE SET value = $2`,
+      [key, JSON.stringify(obj)]
+    );
+  } catch (e) {
+    console.error(`Config save error (${key}):`, e.message);
+  }
+}
+
+function getHandsState() {
+  const holders = Object.entries(sharedExtras.handsHolding)
+    .filter(([, isHolding]) => Boolean(isHolding))
+    .map(([uname]) => uname);
+  return { holders, synced: holders.length >= 2 };
+}
+
 // ================= SHARED GAME MODE & DOODLE STATE =================
 
 const ALLOWED_TTT_EMOJIS = ['❤️', '✨', '🐱', '👑', '🔥', '🦋', '🍕', '🐼'];
@@ -103,7 +180,17 @@ const TTT_WINNER_DARES = [
   'Loser owes 3 nice things about the winner in chat!'
 ];
 
+const BOMB_EXPLODE_DARES = [
+  'BOOM! Send a 5-second funny voice note right now!',
+  'BOOM! Type a dramatic apology for losing!',
+  'BOOM! Draw a cute portrait of your partner in Doodle tab!',
+  'BOOM! Treat your partner to their favorite snack next meet!',
+  'BOOM! Send a secret scratch message with a sweet compliment!',
+  'BOOM! Let your partner choose the next YouTube video!'
+];
+
 let catchTimerHandle = null;
+let bombTimerHandle = null;
 
 const serverGameState = {
   ttt: {
@@ -137,6 +224,27 @@ const serverGameState = {
     scores: {},
     winnerUser: null
   },
+  bomb: {
+    active: false,
+    holder: null,
+    holderName: null,
+    tapsDone: 0,
+    tapsNeeded: 5,
+    passes: 0,
+    explodedOn: null,
+    explodedName: null,
+    dare: null,
+    roundId: 0
+  },
+  likely: {
+    questionIndex: 0,
+    customQuestion: null,
+    picks: {},
+    revealed: false,
+    totalRounds: 0,
+    matchCount: 0,
+    matched: false
+  },
   ytVideoId: null,
   doodleStrokes: []
 };
@@ -145,6 +253,10 @@ function resetAllGameState() {
   if (catchTimerHandle) {
     clearTimeout(catchTimerHandle);
     catchTimerHandle = null;
+  }
+  if (bombTimerHandle) {
+    clearTimeout(bombTimerHandle);
+    bombTimerHandle = null;
   }
   serverGameState.ttt = {
     board: Array(9).fill(null),
@@ -177,8 +289,31 @@ function resetAllGameState() {
     scores: {},
     winnerUser: null
   };
+  serverGameState.bomb = {
+    active: false,
+    holder: null,
+    holderName: null,
+    tapsDone: 0,
+    tapsNeeded: 5,
+    passes: 0,
+    explodedOn: null,
+    explodedName: null,
+    dare: null,
+    roundId: 0
+  };
+  serverGameState.likely = {
+    questionIndex: 0,
+    customQuestion: null,
+    picks: {},
+    revealed: false,
+    totalRounds: 0,
+    matchCount: 0,
+    matched: false
+  };
   serverGameState.ytVideoId = null;
   serverGameState.doodleStrokes = [];
+  sharedExtras.handsHolding = {};
+  sharedExtras.chaosMode = false;
   clearGameAudioMemory();
 }
 
@@ -213,6 +348,30 @@ function getPublicRpsState(forUsername) {
     scores: r.scores,
     lastResult: r.lastResult,
     matchWinner: r.matchWinner
+  };
+}
+
+function getPublicLikelyState(forUsername) {
+  const l = serverGameState.likely;
+  const me = String(forUsername || '').toLowerCase();
+  const maskedPicks = {};
+  for (const [key, val] of Object.entries(l.picks)) {
+    maskedPicks[key] = {
+      name: val.name,
+      locked: true,
+      picked: l.revealed || key === me ? val.picked : null
+    };
+  }
+  const compatibility = l.totalRounds > 0 ? Math.round((l.matchCount / l.totalRounds) * 100) : 100;
+  return {
+    questionIndex: l.questionIndex,
+    customQuestion: l.customQuestion,
+    picks: maskedPicks,
+    revealed: l.revealed,
+    totalRounds: l.totalRounds,
+    matchCount: l.matchCount,
+    matched: l.matched,
+    compatibility
   };
 }
 
@@ -372,6 +531,23 @@ async function initDB() {
         reply_to JSONB DEFAULT NULL,
         seen BOOLEAN DEFAULT FALSE,
         reaction VARCHAR(16) DEFAULT NULL,
+        msg_type VARCHAR(20) DEFAULT 'text',
+        media_id VARCHAR(64) DEFAULT NULL,
+        media_viewed BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS chat_media (
+        id VARCHAR(64) PRIMARY KEY,
+        username VARCHAR(50) NOT NULL,
+        recipient VARCHAR(50) NOT NULL,
+        media_type VARCHAR(20) NOT NULL,
+        mime VARCHAR(64) NOT NULL,
+        data TEXT NOT NULL,
+        view_once BOOLEAN DEFAULT FALSE,
+        viewed BOOLEAN DEFAULT FALSE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
@@ -402,6 +578,9 @@ async function initDB() {
     await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to JSONB DEFAULT NULL;`);
     await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS seen BOOLEAN DEFAULT FALSE;`);
     await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS reaction VARCHAR(16) DEFAULT NULL;`);
+    await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS msg_type VARCHAR(20) DEFAULT 'text';`);
+    await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_id VARCHAR(64) DEFAULT NULL;`);
+    await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_viewed BOOLEAN DEFAULT FALSE;`);
 
     const vapidRes = await pool.query(`SELECT value FROM app_config WHERE key = 'vapid_keys'`);
     if (vapidRes.rows.length > 0) {
@@ -414,7 +593,7 @@ async function initDB() {
       );
     }
 
-    // Restore persisted custom game songs (if previously uploaded)
+    // Restore persisted custom game songs
     for (const type of ['win', 'lose']) {
       const aRes = await pool.query(`SELECT value FROM app_config WHERE key = $1`, [`game_audio_${type}`]);
       if (aRes.rows.length > 0) {
@@ -434,6 +613,25 @@ async function initDB() {
       }
     }
 
+    // Restore persisted Theme, Pet, and Sticky Note
+    const cfgRes = await pool.query(`SELECT key, value FROM app_config WHERE key IN ('chat_theme', 'couple_pet', 'sticky_note')`);
+    for (const row of cfgRes.rows) {
+      try {
+        const parsed = JSON.parse(row.value);
+        if (row.key === 'chat_theme' && ALLOWED_THEMES.includes(parsed.theme)) {
+          sharedExtras.theme = parsed.theme;
+        } else if (row.key === 'couple_pet' && parsed && typeof parsed === 'object') {
+          sharedExtras.pet = {
+            ...sharedExtras.pet,
+            ...parsed,
+            names: (parsed.names && typeof parsed.names === 'object') ? parsed.names : {}
+          };
+        } else if (row.key === 'sticky_note' && parsed && typeof parsed === 'object') {
+          sharedExtras.sticky = { ...sharedExtras.sticky, ...parsed };
+        }
+      } catch (e) {}
+    }
+
     tokenSecret = process.env.TOKEN_SECRET || crypto.createHash('sha256').update(vapidKeys.privateKey).digest('hex');
 
     webpush.setVapidDetails(
@@ -442,7 +640,7 @@ async function initDB() {
       process.env.VAPID_PRIVATE_KEY || vapidKeys.privateKey
     );
 
-    console.log('Database, Security, Game Audio, and Web-Push initialized.');
+    console.log('Database, Security, Media, Pet, Themes & Web-Push initialized.');
   } catch (err) {
     console.error('Database initialization error:', err);
     vapidKeys = loadOrCreateLocalVapidKeys();
@@ -451,9 +649,232 @@ async function initDB() {
   }
 }
 
+// ================= VOICE NOTES & PHOTO (VIEW-ONCE) MEDIA ROUTES =================
+
+app.post(
+  '/chat-media',
+  express.raw({ type: '*/*', limit: '4mb' }),
+  async (req, res) => {
+    try {
+      const username = safeDecodeHeader(req.headers['x-auth-user']).trim();
+      const token = String(req.headers['x-auth-token'] || '');
+      const to = safeDecodeHeader(req.headers['x-media-to']).trim();
+      const mediaType = String(req.headers['x-media-type'] || 'photo').trim();
+      const caption = safeDecodeHeader(req.headers['x-media-caption']).trim().slice(0, 200);
+
+      if (!verifyAuthToken(username, token)) {
+        return res.status(401).json({ error: 'Unauthorized media upload.' });
+      }
+      if (!to || !(await areFriends(username, to))) {
+        return res.status(403).json({ error: 'Partner connection required.' });
+      }
+      if (!['voice', 'photo', 'view_once'].includes(mediaType)) {
+        return res.status(400).json({ error: 'Unsupported media type.' });
+      }
+      if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+        return res.status(400).json({ error: 'Empty file.' });
+      }
+      if (req.body.length > 4 * 1024 * 1024) {
+        return res.status(413).json({ error: 'File must be under 4 MB.' });
+      }
+
+      const rawMime = String(req.headers['content-type'] || '').split(';')[0].trim();
+      const mime = mediaType === 'voice'
+        ? (rawMime.startsWith('audio/') ? rawMime : 'audio/webm')
+        : (rawMime.startsWith('image/') ? rawMime : 'image/jpeg');
+
+      const viewOnce = mediaType === 'view_once';
+      const mediaId = crypto.randomBytes(12).toString('hex');
+
+      const fallbackText = mediaType === 'voice'
+        ? (caption || 'Voice note')
+        : (viewOnce ? (caption || 'View-once photo') : (caption || 'Photo'));
+
+      let savedMsg = null;
+
+      if (useDB) {
+        await pool.query(
+          `INSERT INTO chat_media (id, username, recipient, media_type, mime, data, view_once, viewed)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, FALSE)`,
+          [mediaId, username, to, mediaType, mime, req.body.toString('base64'), viewOnce]
+        );
+
+        const mRes = await pool.query(
+          `INSERT INTO messages (username, recipient, text, reply_to, seen, reaction, msg_type, media_id, media_viewed)
+           VALUES ($1, $2, $3, NULL, FALSE, NULL, $4, $5, FALSE)
+           RETURNING id, username, recipient, text, reply_to, seen, reaction, msg_type, media_id, media_viewed, created_at`,
+          [username, to, fallbackText, mediaType, mediaId]
+        );
+        savedMsg = mRes.rows[0];
+      } else {
+        memoryMedia.set(mediaId, {
+          id: mediaId,
+          username,
+          recipient: to,
+          mediaType,
+          mime,
+          buffer: req.body,
+          viewOnce,
+          viewed: false
+        });
+        savedMsg = {
+          id: msgIdCounter++,
+          username,
+          recipient: to,
+          text: fallbackText,
+          reply_to: null,
+          seen: false,
+          reaction: null,
+          msg_type: mediaType,
+          media_id: mediaId,
+          media_viewed: false,
+          created_at: new Date().toISOString()
+        };
+        memoryMessages.push(savedMsg);
+      }
+
+      emitToUser(username, 'private-message', savedMsg);
+      if (isUserOnline(to)) {
+        emitToUser(to, 'private-message', savedMsg);
+        const recipientSocial = await getSocialDataForUser(to);
+        emitToUser(to, 'social-data', recipientSocial);
+      }
+
+      sendPushNotification(to, {
+        title: username,
+        body: mediaType === 'voice' ? '🎙️ Sent a voice note' : (viewOnce ? '🔥 Sent a view-once photo' : '📷 Sent a photo'),
+        tag: `chat-${username}`
+      });
+
+      return res.json({ success: true, message: savedMsg });
+    } catch (err) {
+      console.error('Chat media upload error:', err);
+      return res.status(500).json({ error: 'Failed to send media.' });
+    }
+  }
+);
+
+app.get('/chat-media/:id', async (req, res) => {
+  try {
+    const mediaId = String(req.params.id || '').trim();
+    const username = String(req.query.u || '').trim();
+    const token = String(req.query.t || '');
+    if (!mediaId || !verifyAuthToken(username, token)) {
+      return res.status(401).end();
+    }
+
+    let entry = null;
+    if (useDB) {
+      const mRes = await pool.query(
+        `SELECT id, username, recipient, media_type, mime, data, view_once, viewed
+         FROM chat_media WHERE id = $1`,
+        [mediaId]
+      );
+      if (mRes.rows.length === 0) return res.status(404).end();
+      const row = mRes.rows[0];
+      entry = {
+        username: row.username,
+        recipient: row.recipient,
+        mime: row.mime,
+        buffer: row.data ? Buffer.from(row.data, 'base64') : null,
+        viewOnce: Boolean(row.view_once),
+        viewed: Boolean(row.viewed)
+      };
+    } else {
+      entry = memoryMedia.get(mediaId);
+      if (!entry) return res.status(404).end();
+    }
+
+    const me = username.toLowerCase();
+    if (entry.username.toLowerCase() !== me && entry.recipient.toLowerCase() !== me) {
+      return res.status(403).end();
+    }
+    if (entry.viewOnce && entry.viewed) {
+      return res.status(410).json({ error: 'View-once photo already opened.' });
+    }
+    if (!entry.buffer || entry.buffer.length === 0) {
+      return res.status(404).end();
+    }
+
+    const buf = entry.buffer;
+    const total = buf.length;
+    const range = req.headers.range;
+
+    res.setHeader('Content-Type', entry.mime || 'application/octet-stream');
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Cache-Control', 'no-store');
+
+    if (range) {
+      const parts = range.replace(/bytes=/, '').split('-');
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : total - 1;
+      if (isNaN(start) || start >= total || end >= total || start > end) {
+        res.status(416).setHeader('Content-Range', `bytes */${total}`).end();
+        return;
+      }
+      res.status(206);
+      res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
+      res.setHeader('Content-Length', end - start + 1);
+      res.end(buf.subarray(start, end + 1));
+    } else {
+      res.status(200);
+      res.setHeader('Content-Length', total);
+      res.end(buf);
+    }
+  } catch (err) {
+    console.error('Get chat media error:', err);
+    return res.status(500).end();
+  }
+});
+
+app.post('/chat-media/:id/consume', async (req, res) => {
+  try {
+    const mediaId = String(req.params.id || '').trim();
+    const username = (req.body?.username || '').trim();
+    const token = req.body?.token || req.headers['x-auth-token'] || '';
+    if (!mediaId || !verifyAuthToken(username, token)) {
+      return res.status(401).json({ error: 'Unauthorized.' });
+    }
+
+    let sender = null;
+    let recipient = null;
+
+    if (useDB) {
+      const mRes = await pool.query(`SELECT username, recipient, view_once FROM chat_media WHERE id = $1`, [mediaId]);
+      if (mRes.rows.length === 0) return res.status(404).json({ error: 'Media not found.' });
+      const row = mRes.rows[0];
+      if (!row.view_once) return res.json({ success: true });
+      sender = row.username;
+      recipient = row.recipient;
+
+      await pool.query(`UPDATE chat_media SET viewed = TRUE, data = '' WHERE id = $1`, [mediaId]);
+      await pool.query(`UPDATE messages SET media_viewed = TRUE WHERE media_id = $1`, [mediaId]);
+    } else {
+      const entry = memoryMedia.get(mediaId);
+      if (!entry) return res.status(404).json({ error: 'Media not found.' });
+      if (!entry.viewOnce) return res.json({ success: true });
+      sender = entry.username;
+      recipient = entry.recipient;
+      entry.viewed = true;
+      entry.buffer = Buffer.alloc(0);
+
+      memoryMessages.forEach(m => {
+        if (m.media_id === mediaId) m.media_viewed = true;
+      });
+    }
+
+    if (sender) emitToUser(sender, 'media-viewed', { mediaId });
+    if (recipient) emitToUser(recipient, 'media-viewed', { mediaId });
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('Consume media error:', err);
+    return res.status(500).json({ error: 'Failed to mark media viewed.' });
+  }
+});
+
 // ================= CUSTOM GAME SONG UPLOAD, STREAMING & DELETE ROUTES =================
 
-// Upload custom Win or Lose song (up to 5 MB raw audio binary — no extra packages needed)
 app.post(
   '/game-audio/:type',
   express.raw({ type: '*/*', limit: '5mb' }),
@@ -518,7 +939,6 @@ app.post(
   }
 );
 
-// Update only startSec without re-uploading the song
 app.post('/game-audio-meta/:type', async (req, res) => {
   try {
     const type = req.params.type;
@@ -562,7 +982,6 @@ app.post('/game-audio-meta/:type', async (req, res) => {
   }
 });
 
-// Stream custom song with HTTP Range support (required for mobile audio seeking)
 app.get('/game-audio/:type', (req, res) => {
   const type = req.params.type;
   if (type !== 'win' && type !== 'lose') return res.status(400).end();
@@ -603,7 +1022,6 @@ app.get('/game-audio/:type', (req, res) => {
   }
 });
 
-// Remove custom song and revert to built-in funny sound
 app.delete('/game-audio/:type', async (req, res) => {
   try {
     const type = req.params.type;
@@ -999,6 +1417,7 @@ app.post('/delete-account', async (req, res) => {
 
       exactUsername = user.username;
       await pool.query('DELETE FROM push_subscriptions WHERE LOWER(username) = LOWER($1)', [exactUsername]);
+      await pool.query('DELETE FROM chat_media WHERE LOWER(username) = LOWER($1) OR LOWER(recipient) = LOWER($1)', [exactUsername]);
       await pool.query('DELETE FROM messages WHERE LOWER(username) = LOWER($1) OR LOWER(recipient) = LOWER($1)', [exactUsername]);
       await pool.query('DELETE FROM friendships WHERE LOWER(requester) = LOWER($1) OR LOWER(recipient) = LOWER($1)', [exactUsername]);
       await pool.query('DELETE FROM users WHERE id = $1', [user.id]);
@@ -1021,6 +1440,12 @@ app.post('/delete-account', async (req, res) => {
       exactUsername = user.username;
       memoryUsers.splice(idx, 1);
       memorySubscriptions.delete(exactUsername.toLowerCase());
+
+      for (const [mid, item] of memoryMedia.entries()) {
+        if (item.username.toLowerCase() === exactUsername.toLowerCase() || item.recipient.toLowerCase() === exactUsername.toLowerCase()) {
+          memoryMedia.delete(mid);
+        }
+      }
 
       for (let i = memoryFriendships.length - 1; i >= 0; i--) {
         const f = memoryFriendships[i];
@@ -1257,15 +1682,25 @@ io.on('connection', async (socket) => {
   await updateLastSeen(username);
   await broadcastSocialUpdates();
 
-  // Send full synchronized Game Mode, Doodle, and Custom Song metadata on connect
+  // Send synchronized Game Mode, Doodle, Custom Songs & Personalized Extras on connect
   socket.emit('game-sync-state', {
     ttt: serverGameState.ttt,
     mind: getPublicMindState(username),
     rps: getPublicRpsState(username),
     catchGame: serverGameState.catchGame,
+    bomb: serverGameState.bomb,
+    likely: getPublicLikelyState(username),
     ytVideoId: serverGameState.ytVideoId,
     doodleStrokes: serverGameState.doodleStrokes,
     gameAudio: getGameAudioMeta()
+  });
+
+  socket.emit('app-extras-sync', {
+    theme: sharedExtras.theme,
+    chaosMode: sharedExtras.chaosMode,
+    hands: getHandsState(),
+    pet: getComputedPetState(username),
+    sticky: sharedExtras.sticky
   });
 
   // -------- CHAT & SOCIAL EVENTS --------
@@ -1306,7 +1741,7 @@ io.on('connection', async (socket) => {
         );
 
         const res = await pool.query(
-          `SELECT id, username, recipient, text, reply_to, seen, reaction, created_at
+          `SELECT id, username, recipient, text, reply_to, seen, reaction, msg_type, media_id, media_viewed, created_at
            FROM messages
            WHERE (LOWER(username) = LOWER($1) AND LOWER(recipient) = LOWER($2))
               OR (LOWER(username) = LOWER($2) AND LOWER(recipient) = LOWER($1))
@@ -1338,7 +1773,7 @@ io.on('connection', async (socket) => {
     }
   });
 
-  socket.on('private-message', async ({ to, text, replyTo } = {}) => {
+  socket.on('private-message', async ({ to, text, replyTo, isSecret } = {}) => {
     const cleanText = (text || '').trim().slice(0, 2000);
     if (!to || !cleanText) return;
 
@@ -1349,14 +1784,15 @@ io.on('connection', async (socket) => {
       const safeReply = replyTo && replyTo.text
         ? { id: replyTo.id, username: String(replyTo.username || ''), text: String(replyTo.text).slice(0, 120) }
         : null;
+      const msgType = isSecret ? 'secret' : 'text';
 
       let savedMsg = null;
       if (useDB) {
         const res = await pool.query(
-          `INSERT INTO messages (username, recipient, text, reply_to, seen, reaction)
-           VALUES ($1, $2, $3, $4, FALSE, NULL)
-           RETURNING id, username, recipient, text, reply_to, seen, reaction, created_at`,
-          [username, to, cleanText, safeReply ? JSON.stringify(safeReply) : null]
+          `INSERT INTO messages (username, recipient, text, reply_to, seen, reaction, msg_type, media_id, media_viewed)
+           VALUES ($1, $2, $3, $4, FALSE, NULL, $5, NULL, FALSE)
+           RETURNING id, username, recipient, text, reply_to, seen, reaction, msg_type, media_id, media_viewed, created_at`,
+          [username, to, cleanText, safeReply ? JSON.stringify(safeReply) : null, msgType]
         );
         savedMsg = res.rows[0];
       } else {
@@ -1368,6 +1804,9 @@ io.on('connection', async (socket) => {
           reply_to: safeReply,
           seen: false,
           reaction: null,
+          msg_type: msgType,
+          media_id: null,
+          media_viewed: false,
           created_at: new Date().toISOString()
         };
         memoryMessages.push(savedMsg);
@@ -1383,7 +1822,7 @@ io.on('connection', async (socket) => {
 
       sendPushNotification(to, {
         title: username,
-        body: cleanText,
+        body: isSecret ? '💌 Sent a secret scratch message!' : cleanText,
         tag: `chat-${username}`
       });
     } catch (err) {
@@ -1396,6 +1835,138 @@ io.on('connection', async (socket) => {
     emitToUser(username, 'heart-shower', { from: username });
     if (isUserOnline(to)) {
       emitToUser(to, 'heart-shower', { from: username });
+    }
+  });
+
+  // -------- LIVE CHAOS TYPING MODE --------
+
+  socket.on('chaos-toggle', async ({ to, enabled } = {}) => {
+    if (!to || !(await areFriends(username, to))) return;
+    sharedExtras.chaosMode = Boolean(enabled);
+    const payload = { enabled: sharedExtras.chaosMode, by: username };
+    emitToUser(username, 'chaos-state', payload);
+    if (isUserOnline(to)) emitToUser(to, 'chaos-state', payload);
+  });
+
+  socket.on('chaos-draft', async ({ to, text } = {}) => {
+    if (!to || !sharedExtras.chaosMode) return;
+    if (isUserOnline(to)) {
+      emitToUser(to, 'chaos-draft', { from: username, text: String(text || '').slice(0, 300) });
+    }
+  });
+
+  // -------- HOLD HANDS LIVE HEARTBEAT SYNC --------
+
+  socket.on('hold-hands', async ({ to, holding } = {}) => {
+    if (!to || !(await areFriends(username, to))) return;
+    const me = username.toLowerCase();
+    sharedExtras.handsHolding[me] = Boolean(holding);
+    const state = getHandsState();
+    emitToUser(username, 'hold-hands-state', state);
+    if (isUserOnline(to)) emitToUser(to, 'hold-hands-state', state);
+  });
+
+  // -------- LIVE SYNCED CHAT THEMES --------
+
+  socket.on('set-theme', async ({ to, theme } = {}) => {
+    if (!to || !ALLOWED_THEMES.includes(theme)) return;
+    if (!(await areFriends(username, to))) return;
+    sharedExtras.theme = theme;
+    await persistAppConfig('chat_theme', { theme });
+    const payload = { theme, by: username };
+    emitToUser(username, 'theme-sync', payload);
+    if (isUserOnline(to)) emitToUser(to, 'theme-sync', payload);
+  });
+
+  // -------- VIRTUAL COUPLE PET (INDEPENDENT NAMES PER USER) --------
+
+  socket.on('pet-action', async ({ to, action, name } = {}) => {
+    try {
+      if (!to || !(await areFriends(username, to))) return;
+      const me = username.toLowerCase();
+      const cur = getComputedPetState(username);
+      const p = sharedExtras.pet;
+      if (!p.names || typeof p.names !== 'object') p.names = {};
+
+      p.hunger = cur.hunger;
+      p.happiness = cur.happiness;
+
+      const todayKey = new Date().toISOString().slice(0, 10);
+      let myNote = '';
+      let partnerNote = '';
+
+      if (action === 'feed') {
+        p.hunger = Math.min(100, p.hunger + 22);
+        p.happiness = Math.min(100, p.happiness + 8);
+        p.xp += 20;
+        if (p.lastFedDate !== todayKey) {
+          p.streak = (p.streak || 0) + 1;
+          p.lastFedDate = todayKey;
+        }
+        myNote = `Fed ${getComputedPetState(username).name} 🐟`;
+        partnerNote = `${username} fed ${getComputedPetState(to).name} 🐟`;
+      } else if (action === 'play') {
+        p.happiness = Math.min(100, p.happiness + 24);
+        p.hunger = Math.max(10, p.hunger - 5);
+        p.xp += 25;
+        myNote = `Played with ${getComputedPetState(username).name} 🧶`;
+        partnerNote = `${username} played with ${getComputedPetState(to).name} 🧶`;
+      } else if (action === 'pet') {
+        p.happiness = Math.min(100, p.happiness + 16);
+        p.xp += 12;
+        myNote = `Cuddled ${getComputedPetState(username).name} 💖`;
+        partnerNote = `${username} cuddled ${getComputedPetState(to).name} 💖`;
+      } else if (action === 'rename' && name && String(name).trim()) {
+        // Only update THIS user's pet name; partner's pet name stays independent
+        const cleanPetName = String(name).trim().slice(0, 26);
+        p.names[me] = cleanPetName;
+        myNote = `Your pet is now named "${cleanPetName}" 🐾`;
+        partnerNote = `${username} named their pet "${cleanPetName}" 🐾`;
+      } else {
+        return;
+      }
+
+      // Level up every 100 XP
+      let leveledUp = false;
+      while (p.xp >= 100) {
+        p.xp -= 100;
+        p.level += 1;
+        leveledUp = true;
+      }
+      if (leveledUp) {
+        myNote = `🎉 ${getComputedPetState(username).name} reached Level ${p.level}!`;
+        partnerNote = `🎉 ${getComputedPetState(to).name} reached Level ${p.level}!`;
+      }
+
+      p.lastInteraction = Date.now();
+      await persistAppConfig('couple_pet', p);
+
+      emitToUser(username, 'pet-state', { pet: getComputedPetState(username), note: myNote, action });
+      if (isUserOnline(to)) {
+        emitToUser(to, 'pet-state', { pet: getComputedPetState(to), note: partnerNote, action });
+      }
+    } catch (err) {
+      console.error('pet-action error:', err);
+    }
+  });
+
+  // -------- SHARED STICKY NOTE & COUNTDOWN --------
+
+  socket.on('sticky-update', async ({ to, note, countdownTitle, countdownDate } = {}) => {
+    try {
+      if (!to || !(await areFriends(username, to))) return;
+      sharedExtras.sticky = {
+        note: String(note || '').trim().slice(0, 180),
+        updatedBy: username,
+        countdownTitle: String(countdownTitle || '').trim().slice(0, 50),
+        countdownDate: String(countdownDate || '').trim().slice(0, 30)
+      };
+      await persistAppConfig('sticky_note', sharedExtras.sticky);
+
+      emitToUser(username, 'sticky-state', sharedExtras.sticky);
+      if (isUserOnline(to)) emitToUser(to, 'sticky-state', sharedExtras.sticky);
+    } catch (err) {
+      console.error('sticky-update error:', err);
     }
   });
 
@@ -1662,7 +2233,125 @@ io.on('connection', async (socket) => {
     }
   });
 
-  // -------- 5. WATCH TOGETHER + LIVE REACTIONS --------
+  // -------- 5. HOT POTATO / BOMB PASS --------
+
+  socket.on('bomb-start', async ({ to } = {}) => {
+    try {
+      if (!to || !(await areFriends(username, to))) return;
+      if (bombTimerHandle) clearTimeout(bombTimerHandle);
+
+      const me = username.toLowerCase();
+      const partner = to.toLowerCase();
+      const startWithMe = Math.random() < 0.5;
+      const durationMs = 8000 + Math.floor(Math.random() * 8000);
+
+      serverGameState.bomb = {
+        active: true,
+        holder: startWithMe ? me : partner,
+        holderName: startWithMe ? username : to,
+        tapsDone: 0,
+        tapsNeeded: 5,
+        passes: 0,
+        explodedOn: null,
+        explodedName: null,
+        dare: null,
+        roundId: Date.now()
+      };
+
+      emitToUser(username, 'bomb-state', serverGameState.bomb);
+      if (isUserOnline(to)) emitToUser(to, 'bomb-state', serverGameState.bomb);
+
+      bombTimerHandle = setTimeout(() => {
+        const b = serverGameState.bomb;
+        b.active = false;
+        b.explodedOn = b.holder;
+        b.explodedName = b.holderName;
+        b.dare = BOMB_EXPLODE_DARES[Math.floor(Math.random() * BOMB_EXPLODE_DARES.length)];
+        emitToUser(username, 'bomb-state', b);
+        if (isUserOnline(to)) emitToUser(to, 'bomb-state', b);
+        bombTimerHandle = null;
+      }, durationMs);
+    } catch (err) {
+      console.error('bomb-start error:', err);
+    }
+  });
+
+  socket.on('bomb-tap', async ({ to } = {}) => {
+    try {
+      if (!to || !(await areFriends(username, to))) return;
+      const b = serverGameState.bomb;
+      const me = username.toLowerCase();
+      const partner = to.toLowerCase();
+      if (!b.active || b.holder !== me) return;
+
+      b.tapsDone += 1;
+      if (b.tapsDone >= b.tapsNeeded) {
+        b.holder = partner;
+        b.holderName = to;
+        b.tapsDone = 0;
+        b.tapsNeeded = 4 + Math.floor(Math.random() * 4);
+        b.passes += 1;
+      }
+
+      emitToUser(username, 'bomb-state', b);
+      if (isUserOnline(to)) emitToUser(to, 'bomb-state', b);
+    } catch (err) {
+      console.error('bomb-tap error:', err);
+    }
+  });
+
+  // -------- 6. WHO'S MORE LIKELY TO? QUIZ --------
+
+  socket.on('likely-pick', async ({ to, pickUser } = {}) => {
+    try {
+      const cleanPick = String(pickUser || '').trim().slice(0, 50);
+      if (!to || !cleanPick) return;
+      if (!(await areFriends(username, to))) return;
+
+      const l = serverGameState.likely;
+      if (l.revealed) return;
+
+      const me = username.toLowerCase();
+      const partner = to.toLowerCase();
+      l.picks[me] = { name: username, picked: cleanPick };
+
+      if (l.picks[me] && l.picks[partner]) {
+        l.revealed = true;
+        l.totalRounds += 1;
+        const isMatch = l.picks[me].picked.toLowerCase() === l.picks[partner].picked.toLowerCase();
+        l.matched = isMatch;
+        if (isMatch) l.matchCount += 1;
+      }
+
+      emitToUser(username, 'likely-state', getPublicLikelyState(username));
+      if (isUserOnline(to)) emitToUser(to, 'likely-state', getPublicLikelyState(to));
+    } catch (err) {
+      console.error('likely-pick error:', err);
+    }
+  });
+
+  socket.on('likely-next', async ({ to, questionIndex, customQuestion } = {}) => {
+    try {
+      if (!to || !(await areFriends(username, to))) return;
+      const l = serverGameState.likely;
+      l.picks = {};
+      l.revealed = false;
+      l.matched = false;
+      if (customQuestion && String(customQuestion).trim()) {
+        l.customQuestion = String(customQuestion).trim().slice(0, 90);
+      } else {
+        l.customQuestion = null;
+        l.questionIndex = typeof questionIndex === 'number' ? questionIndex : l.questionIndex + 1;
+      }
+
+      emitToUser(username, 'likely-state', getPublicLikelyState(username));
+      if (isUserOnline(to)) emitToUser(to, 'likely-state', getPublicLikelyState(to));
+    } catch (err) {
+      console.error('likely-next error:', err);
+    }
+  });
+
+  // -------- 7. WATCH TOGETHER + LIVE REACTIONS --------
 
   socket.on('yt-sync', async ({ to, videoId, action, timeSec } = {}) => {
     try {
@@ -1695,7 +2384,7 @@ io.on('connection', async (socket) => {
     }
   });
 
-  // -------- 6. SHARED LIVE DOODLE CANVAS --------
+  // -------- 8. SHARED LIVE DOODLE CANVAS --------
 
   socket.on('doodle-draw', async ({ to, segment } = {}) => {
     try {
@@ -1805,10 +2494,13 @@ io.on('connection', async (socket) => {
     try {
       if (useDB) {
         const res = await pool.query(
-          'DELETE FROM messages WHERE id = $1 AND LOWER(username) = LOWER($2) RETURNING id',
+          'DELETE FROM messages WHERE id = $1 AND LOWER(username) = LOWER($2) RETURNING id, media_id',
           [id, username]
         );
         if (res.rows.length > 0) {
+          if (res.rows[0].media_id) {
+            await pool.query('DELETE FROM chat_media WHERE id = $1', [res.rows[0].media_id]);
+          }
           emitToUser(username, 'message-deleted', id);
           if (friend && isUserOnline(friend)) emitToUser(friend, 'message-deleted', id);
         }
@@ -1817,7 +2509,8 @@ io.on('connection', async (socket) => {
           m => String(m.id) === String(id) && m.username.toLowerCase() === username.toLowerCase()
         );
         if (idx !== -1) {
-          memoryMessages.splice(idx, 1);
+          const removed = memoryMessages.splice(idx, 1)[0];
+          if (removed.media_id) memoryMedia.delete(removed.media_id);
           emitToUser(username, 'message-deleted', id);
           if (friend && isUserOnline(friend)) emitToUser(friend, 'message-deleted', id);
         }
@@ -1835,6 +2528,12 @@ io.on('connection', async (socket) => {
 
       if (useDB) {
         await pool.query(
+          `DELETE FROM chat_media
+           WHERE (LOWER(username) = LOWER($1) AND LOWER(recipient) = LOWER($2))
+              OR (LOWER(username) = LOWER($2) AND LOWER(recipient) = LOWER($1))`,
+          [username, friend]
+        );
+        await pool.query(
           `DELETE FROM messages
            WHERE (LOWER(username) = LOWER($1) AND LOWER(recipient) = LOWER($2))
               OR (LOWER(username) = LOWER($2) AND LOWER(recipient) = LOWER($1))`,
@@ -1847,6 +2546,7 @@ io.on('connection', async (socket) => {
             (m.username.toLowerCase() === username.toLowerCase() && m.recipient.toLowerCase() === friend.toLowerCase()) ||
             (m.username.toLowerCase() === friend.toLowerCase() && m.recipient.toLowerCase() === username.toLowerCase())
           ) {
+            if (m.media_id) memoryMedia.delete(m.media_id);
             memoryMessages.splice(i, 1);
           }
         }
@@ -1908,6 +2608,14 @@ io.on('connection', async (socket) => {
       set.delete(socket.id);
       if (set.size === 0) {
         userSockets.delete(username);
+        const me = username.toLowerCase();
+        if (sharedExtras.handsHolding[me]) {
+          sharedExtras.handsHolding[me] = false;
+          const state = getHandsState();
+          for (const uname of userSockets.keys()) {
+            emitToUser(uname, 'hold-hands-state', state);
+          }
+        }
       }
     }
     await updateLastSeen(username);

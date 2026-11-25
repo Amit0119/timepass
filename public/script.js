@@ -5,6 +5,7 @@ let activeFriend = null;
 let socialState = { friends: [], requests: [], discover: [] };
 let typingTimeout = null;
 let remoteTypingTimer = null;
+let chaosHideTimer = null;
 let replyingToMessage = null;
 let lastRenderedDateKey = null;
 let toastTimer = null;
@@ -17,6 +18,146 @@ const userSettings = {
   vibrateEnabled: localStorage.getItem('ps_vibrate') !== 'false',
   autoLogin: localStorage.getItem('ps_autologin') !== 'false'
 };
+
+// ================= SHARED EXTRAS STATE =================
+
+const THEME_LIST = ['rose', 'rain', 'galaxy', 'sakura', 'sunset'];
+let currentTheme = 'rose';
+let chaosModeEnabled = false;
+let isSecretMode = false;
+
+// Hold Hands Heartbeat State
+let isHoldingHand = false;
+let handsHeartbeatInterval = null;
+
+// Virtual Couple Pet State (Independent name per user)
+let petState = {
+  name: 'Mochi',
+  level: 1,
+  xp: 0,
+  hunger: 82,
+  happiness: 86,
+  streak: 1,
+  mood: 'happy'
+};
+
+// Shared Sticky Note & Countdown State
+let stickyState = {
+  note: 'Drink water & smile today! 💖',
+  updatedBy: 'MINI-WORLD',
+  countdownTitle: '',
+  countdownDate: ''
+};
+let stickyCountdownInterval = null;
+
+// Voice Note & Photo Media State
+let mediaRecorder = null;
+let voiceChunks = [];
+let voiceStream = null;
+let voiceRecordTimer = null;
+let voiceRecordSeconds = 0;
+let voiceCancelled = false;
+let pendingPhotoFile = null;
+let pendingPhotoPreviewUrl = null;
+let lightboxObjectUrl = null;
+
+// Stealth Calculator & Dynamic Notes State
+let calcExpr = '0';
+let calcRawSeq = '';
+let lastNotesSignature = '';
+
+const CS_NOTES_BANK = [
+  {
+    subject: 'DBMS',
+    title: 'Normalization Forms (1NF to BCNF)',
+    body: '<strong>1NF:</strong> Atomic values, no repeating groups.<br><strong>2NF:</strong> 1NF + no partial dependency on composite key.<br><strong>3NF:</strong> 2NF + no transitive dependency.<br><strong>BCNF:</strong> For every FD X → Y, X must be a super key.'
+  },
+  {
+    subject: 'DBMS',
+    title: 'ACID Properties in Transactions',
+    body: '<strong>Atomicity:</strong> All operations succeed or none.<br><strong>Consistency:</strong> Preserves DB constraints.<br><strong>Isolation:</strong> Concurrent transactions stay independent.<br><strong>Durability:</strong> Committed writes survive crashes.'
+  },
+  {
+    subject: 'DBMS',
+    title: 'B-Tree vs B+ Tree Indexing',
+    body: 'In a <strong>B-Tree</strong>, keys and data pointers live in both internal and leaf nodes. In a <strong>B+ Tree</strong>, all data pointers are stored only in linked leaf nodes, making range queries much faster.'
+  },
+  {
+    subject: 'DBMS',
+    title: 'SQL Joins Quick Comparison',
+    body: '<strong>INNER JOIN:</strong> Only matching rows.<br><strong>LEFT JOIN:</strong> All left rows + matched right.<br><strong>RIGHT JOIN:</strong> All right rows + matched left.<br><strong>FULL OUTER:</strong> All rows from both tables.'
+  },
+  {
+    subject: 'OS',
+    title: 'Deadlock Necessary Conditions (Coffman)',
+    body: 'All four must hold simultaneously: <strong>Mutual Exclusion</strong>, <strong>Hold &amp; Wait</strong>, <strong>No Preemption</strong>, and <strong>Circular Wait</strong>. Breaking any one prevents deadlock.'
+  },
+  {
+    subject: 'OS',
+    title: 'CPU Scheduling Algorithms',
+    body: '<strong>FCFS:</strong> Simple queue, suffers from convoy effect.<br><strong>SJF/SRTF:</strong> Minimum average waiting time.<br><strong>Round Robin:</strong> Fixed time quantum, fair for interactive systems.'
+  },
+  {
+    subject: 'OS',
+    title: 'Paging vs Segmentation',
+    body: '<strong>Paging</strong> divides memory into fixed-size frames/pages (avoids external fragmentation). <strong>Segmentation</strong> divides memory into logical variable-size blocks like code, stack, and heap.'
+  },
+  {
+    subject: 'OS',
+    title: 'Thrashing & Working Set Model',
+    body: '<strong>Thrashing</strong> occurs when a process spends more time swapping pages (page faults) than executing instructions. Solved using working-set tracking or reducing degree of multiprogramming.'
+  },
+  {
+    subject: 'CN',
+    title: 'OSI Model — 7 Layers',
+    body: '1. Physical • 2. Data Link • 3. Network • 4. Transport • 5. Session • 6. Presentation • 7. Application.<br><em>Mnemonic:</em> Please Do Not Throw Sausage Pizza Away.'
+  },
+  {
+    subject: 'CN',
+    title: 'TCP 3-Way Handshake',
+    body: '<strong>1. SYN:</strong> Client sends initial sequence number.<br><strong>2. SYN-ACK:</strong> Server acknowledges and sends its own SYN.<br><strong>3. ACK:</strong> Client confirms; reliable full-duplex connection starts.'
+  },
+  {
+    subject: 'CN',
+    title: 'TCP vs UDP Protocol',
+    body: '<strong>TCP:</strong> Connection-oriented, reliable, ordered delivery, flow/congestion control (HTTP, FTP).<br><strong>UDP:</strong> Connectionless, low latency, no retransmission (DNS, WebRTC, gaming).'
+  },
+  {
+    subject: 'CN',
+    title: 'HTTP Status Code Groups',
+    body: '<strong>2xx:</strong> Success (200 OK, 201 Created).<br><strong>3xx:</strong> Redirection (301, 304).<br><strong>4xx:</strong> Client Error (401 Unauthorized, 404 Not Found).<br><strong>5xx:</strong> Server Error (500, 502).'
+  },
+  {
+    subject: 'DSA',
+    title: 'Sorting Time Complexities',
+    body: '<strong>Merge Sort:</strong> O(n log n) worst, stable.<br><strong>Quick Sort:</strong> O(n log n) avg, O(n²) worst, in-place.<br><strong>Heap Sort:</strong> O(n log n) worst, O(1) extra space.'
+  },
+  {
+    subject: 'DSA',
+    title: 'BFS vs DFS Graph Traversal',
+    body: '<strong>BFS</strong> uses a Queue and finds the shortest path in unweighted graphs. <strong>DFS</strong> uses a Stack/Recursion and is ideal for topological sort, cycle detection, and connected components.'
+  },
+  {
+    subject: 'DSA',
+    title: 'Dynamic Programming Principles',
+    body: 'DP applies when a problem has <strong>Optimal Substructure</strong> and <strong>Overlapping Subproblems</strong>. Implemented via Top-Down (Memoization) or Bottom-Up (Tabulation).'
+  },
+  {
+    subject: 'Web Tech',
+    title: 'REST API Design Constraints',
+    body: 'Stateless client-server communication, uniform resource URIs, standard HTTP verbs (GET, POST, PUT, PATCH, DELETE), and cacheable JSON responses.'
+  },
+  {
+    subject: 'Web Tech',
+    title: 'JavaScript Event Loop',
+    body: 'Call Stack runs synchronous code first. <strong>Microtasks</strong> (Promises, queueMicrotask) always drain completely before the next <strong>Macrotask</strong> (setTimeout, I/O callbacks).'
+  },
+  {
+    subject: 'COA',
+    title: 'Cache Mapping Techniques',
+    body: '<strong>Direct Mapped:</strong> Each block maps to one fixed line.<br><strong>Fully Associative:</strong> Block can go anywhere.<br><strong>Set-Associative:</strong> Hybrid balance of hit rate and hardware cost.'
+  }
+];
 
 // ================= SHARED CUSTOM GAME SONGS STATE =================
 
@@ -89,10 +230,50 @@ let catchSpawnInterval = null;
 let catchTimerInterval = null;
 let lastAnnouncedCatchEnd = 0;
 
-// 5. Watch Together State
+// 5. Hot Potato / Bomb Pass State
+let bombState = {
+  active: false,
+  holder: null,
+  holderName: null,
+  tapsDone: 0,
+  tapsNeeded: 5,
+  passes: 0,
+  explodedOn: null,
+  explodedName: null,
+  dare: null,
+  roundId: 0
+};
+let lastAnnouncedBombId = 0;
+
+// 6. Who's More Likely To? State
+const likelyQuestions = [
+  'get late for a date or hangout?',
+  'say sorry first after a silly fight?',
+  'fall asleep during a late-night movie?',
+  'spend money impulsively on food or shopping?',
+  'forget where they kept their phone?',
+  'plan a surprise trip or gift?',
+  'cry during an emotional movie scene?',
+  'stay up scrolling reels until 3 AM?',
+  'win an argument even when wrong?',
+  'eat the last slice of pizza without asking?'
+];
+let likelyState = {
+  questionIndex: 0,
+  customQuestion: null,
+  picks: {},
+  revealed: false,
+  totalRounds: 0,
+  matchCount: 0,
+  matched: false,
+  compatibility: 100
+};
+let lastAnnouncedLikelyKey = null;
+
+// 7. Watch Together State
 let ytVideoId = null;
 
-// 6. Shared Doodle State
+// 8. Shared Doodle State
 let doodleStrokes = [];
 let doodleColor = '#38bdf8';
 let doodleSize = 4;
@@ -100,7 +281,7 @@ let isDoodling = false;
 let lastDoodlePos = null;
 let doodleCtx = null;
 
-// 7. Dudu-Bubu Cartoon Actions
+// Dudu-Bubu Cartoon Actions
 const DUDU_ACTIONS = [
   { cls: 'action-bonk', label: '🐻 Bonk!', fx: '💥' },
   { cls: 'action-hug', label: '🫂 Hug!', fx: '💖' },
@@ -135,7 +316,6 @@ const rtcConfig = {
 
 // ================= DOM ELEMENTS =================
 
-// Romantic Stage, Kittens, Typing Pill, Toast & Confirm Modal
 const heartShowerStage = document.getElementById('heart-shower-stage');
 const cuteKittensStage = document.getElementById('cute-kittens-stage');
 const liveTypingPill = document.getElementById('live-typing-pill');
@@ -147,15 +327,118 @@ const confirmMessage = document.getElementById('confirm-message');
 const confirmCancelBtn = document.getElementById('confirm-cancel-btn');
 const confirmOkBtn = document.getElementById('confirm-ok-btn');
 
-// Game Mode Shell & Dudu-Bubu
+// Stealth / Panic Mode Elements
+const stealthPanicBtn = document.getElementById('stealth-panic-btn');
+const stealthOverlay = document.getElementById('stealth-overlay');
+const stealthExitTrigger = document.getElementById('stealth-exit-trigger');
+const stealthTabs = document.querySelectorAll('.stealth-tab');
+const calcDisplay = document.getElementById('calc-display');
+const calcButtons = document.querySelectorAll('.calc-btn');
+const notesTopicTitle = document.getElementById('notes-topic-title');
+const refreshNotesBtn = document.getElementById('refresh-notes-btn');
+const stealthNotesList = document.getElementById('stealth-notes-list');
+
+// Sticky Note, Quick Bar & Chaos Elements
+const stickyBannerBtn = document.getElementById('sticky-banner-btn');
+const stickyBannerText = document.getElementById('sticky-banner-text');
+const stickyCountdownPill = document.getElementById('sticky-countdown-pill');
+const stickyModal = document.getElementById('sticky-modal');
+const closeStickyBtn = document.getElementById('close-sticky-btn');
+const stickyForm = document.getElementById('sticky-form');
+const stickyNoteInput = document.getElementById('sticky-note-input');
+const stickyCountdownTitle = document.getElementById('sticky-countdown-title');
+const stickyCountdownDate = document.getElementById('sticky-countdown-date');
+const clearCountdownBtn = document.getElementById('clear-countdown-btn');
+
+const openHandsBtn = document.getElementById('open-hands-btn');
+const quickThemeBtn = document.getElementById('quick-theme-btn');
+const quickChaosBtn = document.getElementById('quick-chaos-btn');
+const chaosLiveBar = document.getElementById('chaos-live-bar');
+const chaosLiveUser = document.getElementById('chaos-live-user');
+const chaosLiveText = document.getElementById('chaos-live-text');
+
+// Hold Hands Modal Elements
+const holdHandsModal = document.getElementById('hold-hands-modal');
+const closeHandsBtn = document.getElementById('close-hands-btn');
+const handsStatusText = document.getElementById('hands-status-text');
+const handsPulseRing = document.getElementById('hands-pulse-ring');
+const handsTouchPad = document.getElementById('hands-touch-pad');
+const handsEcgWave = document.getElementById('hands-ecg-wave');
+
+// Virtual Couple Pet Elements
+const petHudName = document.getElementById('pet-hud-name');
+const petHudLevel = document.getElementById('pet-hud-level');
+const petHudMood = document.getElementById('pet-hud-mood');
+const petModal = document.getElementById('pet-modal');
+const petModalTitle = document.getElementById('pet-modal-title');
+const closePetBtn = document.getElementById('close-pet-btn');
+const petBigAvatar = document.getElementById('pet-big-avatar');
+const petLevelBadge = document.getElementById('pet-level-badge');
+const petStreakBadge = document.getElementById('pet-streak-badge');
+const petMoodText = document.getElementById('pet-mood-text');
+const petHungerBar = document.getElementById('pet-hunger-bar');
+const petHungerVal = document.getElementById('pet-hunger-val');
+const petHappyBar = document.getElementById('pet-happy-bar');
+const petHappyVal = document.getElementById('pet-happy-val');
+const petFeedBtn = document.getElementById('pet-feed-btn');
+const petPlayBtn = document.getElementById('pet-play-btn');
+const petCuddleBtn = document.getElementById('pet-cuddle-btn');
+const petRenameInput = document.getElementById('pet-rename-input');
+const petRenameBtn = document.getElementById('pet-rename-btn');
+
+// Media, Secret & Voice Input Elements
+const secretMsgBtn = document.getElementById('secret-msg-btn');
+const photoAttachBtn = document.getElementById('photo-attach-btn');
+const chatPhotoInput = document.getElementById('chat-photo-input');
+const voiceRecordBtn = document.getElementById('voice-record-btn');
+const voiceRecordingBar = document.getElementById('voice-recording-bar');
+const voiceRecordTimerEl = document.getElementById('voice-record-timer');
+const voiceCancelBtn = document.getElementById('voice-cancel-btn');
+const voiceSendBtn = document.getElementById('voice-send-btn');
+
+const photoPreviewModal = document.getElementById('photo-preview-modal');
+const closePhotoPreviewBtn = document.getElementById('close-photo-preview-btn');
+const photoPreviewImg = document.getElementById('photo-preview-img');
+const photoCaptionInput = document.getElementById('photo-caption-input');
+const photoViewOnceCheckbox = document.getElementById('photo-view-once-checkbox');
+const cancelPhotoSendBtn = document.getElementById('cancel-photo-send-btn');
+const confirmPhotoSendBtn = document.getElementById('confirm-photo-send-btn');
+
+const photoLightboxModal = document.getElementById('photo-lightbox-modal');
+const lightboxBadge = document.getElementById('lightbox-badge');
+const closeLightboxBtn = document.getElementById('close-lightbox-btn');
+const lightboxImg = document.getElementById('lightbox-img');
+const lightboxCaption = document.getElementById('lightbox-caption');
+
+// Game Mode Shell, Game Settings & Dudu-Bubu
 const openGameModeBtn = document.getElementById('open-game-mode-btn');
 const gameModeModal = document.getElementById('game-mode-modal');
 const closeGameModeBtn = document.getElementById('close-game-mode-btn');
+const openGameSettingsBtn = document.getElementById('open-game-settings-btn');
+const gameSettingsModal = document.getElementById('game-settings-modal');
+const closeGameSettingsBtn = document.getElementById('close-game-settings-btn');
 const stopGameAudioBtn = document.getElementById('stop-game-audio-btn');
 const gameTabs = document.querySelectorAll('.game-tab');
 const duduBubuStage = document.getElementById('dudu-bubu-stage');
 const duduBubuFx = document.getElementById('dudu-bubu-fx');
 const duduActionBtn = document.getElementById('dudu-action-btn');
+
+// Game Audio Settings Elements
+const gameAudioFeedback = document.getElementById('game-audio-feedback');
+const winSongStatus = document.getElementById('win-song-status');
+const winSongFileInput = document.getElementById('win-song-file');
+const winSongPickedEl = document.getElementById('win-song-picked');
+const winSongStartInput = document.getElementById('win-song-start');
+const uploadWinSongBtn = document.getElementById('upload-win-song-btn');
+const testWinSongBtn = document.getElementById('test-win-song-btn');
+const clearWinSongBtn = document.getElementById('clear-win-song-btn');
+const loseSongStatus = document.getElementById('lose-song-status');
+const loseSongFileInput = document.getElementById('lose-song-file');
+const loseSongPickedEl = document.getElementById('lose-song-picked');
+const loseSongStartInput = document.getElementById('lose-song-start');
+const uploadLoseSongBtn = document.getElementById('upload-lose-song-btn');
+const testLoseSongBtn = document.getElementById('test-lose-song-btn');
+const clearLoseSongBtn = document.getElementById('clear-lose-song-btn');
 
 // Game 1: Tic-Tac-Toe
 const tttScoreMeLabel = document.getElementById('ttt-score-me-label');
@@ -206,7 +489,28 @@ const catchOverlay = document.getElementById('catch-overlay');
 const catchStatusMsg = document.getElementById('catch-status-msg');
 const catchStartBtn = document.getElementById('catch-start-btn');
 
-// Game 5: Watch Together + Live Reactions
+// Game 5: Hot Potato / Bomb Pass
+const bombPassesPill = document.getElementById('bomb-passes-pill');
+const bombStatusBanner = document.getElementById('bomb-status-banner');
+const bombTapBtn = document.getElementById('bomb-tap-btn');
+const bombIcon = document.getElementById('bomb-icon');
+const bombTapProgress = document.getElementById('bomb-tap-progress');
+const bombDareCard = document.getElementById('bomb-dare-card');
+const bombDareText = document.getElementById('bomb-dare-text');
+const bombStartBtn = document.getElementById('bomb-start-btn');
+
+// Game 6: Who's More Likely To?
+const likelyCompatBadge = document.getElementById('likely-compat-badge');
+const likelyQuestionText = document.getElementById('likely-question-text');
+const likelyPickMeBtn = document.getElementById('likely-pick-me');
+const likelyPickPartnerBtn = document.getElementById('likely-pick-partner');
+const likelyStatusBanner = document.getElementById('likely-status-banner');
+const likelyRevealArea = document.getElementById('likely-reveal-area');
+const likelyCustomInput = document.getElementById('likely-custom-input');
+const likelyCustomBtn = document.getElementById('likely-custom-btn');
+const likelyNextBtn = document.getElementById('likely-next-btn');
+
+// Game 7: Watch Together + Live Reactions
 const ytLoadForm = document.getElementById('yt-load-form');
 const ytUrlInput = document.getElementById('yt-url-input');
 const ytEmptyMsg = document.getElementById('yt-empty-msg');
@@ -214,7 +518,7 @@ const ytIframe = document.getElementById('yt-iframe');
 const watchReactionStage = document.getElementById('watch-reaction-stage');
 const watchReactButtons = document.querySelectorAll('.watch-react-btn');
 
-// Game 6: Shared Live Doodle Canvas
+// Game 8: Shared Live Doodle Canvas
 const doodleCanvas = document.getElementById('doodle-canvas');
 const doodleColorButtons = document.querySelectorAll('.doodle-color-btn');
 const doodleSizeInput = document.getElementById('doodle-size');
@@ -281,25 +585,14 @@ const heartShowerBtn = document.getElementById('heart-shower-btn');
 const messageInput = document.getElementById('message-input');
 const sendBtn = document.getElementById('send-btn');
 
-// Settings Modal Elements
+// App Settings Modal Elements
 const settingsModal = document.getElementById('settings-modal');
 const closeSettingsBtn = document.getElementById('close-settings-btn');
+const themeChips = document.querySelectorAll('.theme-chip');
+const toggleChaosCheckbox = document.getElementById('toggle-chaos-mode');
 const toggleSoundCheckbox = document.getElementById('toggle-sound');
 const toggleVibrateCheckbox = document.getElementById('toggle-vibrate');
 const toggleAutologinCheckbox = document.getElementById('toggle-autologin');
-const gameAudioFeedback = document.getElementById('game-audio-feedback');
-const winSongStatus = document.getElementById('win-song-status');
-const winSongFileInput = document.getElementById('win-song-file');
-const winSongStartInput = document.getElementById('win-song-start');
-const uploadWinSongBtn = document.getElementById('upload-win-song-btn');
-const testWinSongBtn = document.getElementById('test-win-song-btn');
-const clearWinSongBtn = document.getElementById('clear-win-song-btn');
-const loseSongStatus = document.getElementById('lose-song-status');
-const loseSongFileInput = document.getElementById('lose-song-file');
-const loseSongStartInput = document.getElementById('lose-song-start');
-const uploadLoseSongBtn = document.getElementById('upload-lose-song-btn');
-const testLoseSongBtn = document.getElementById('test-lose-song-btn');
-const clearLoseSongBtn = document.getElementById('clear-lose-song-btn');
 const enablePushBtn = document.getElementById('enable-push-btn');
 const pushStatusDesc = document.getElementById('push-status-desc');
 const clearChatBtn = document.getElementById('clear-chat-btn');
@@ -390,11 +683,16 @@ window.addEventListener('DOMContentLoaded', () => {
   initGameModeCanvas();
   initDoodleCanvas();
   applyDuduAction(0);
+  renderRandomStealthNotes();
   renderGameAudioSettings();
+  renderPetUI();
+  renderStickyUI();
   renderTicTacToe();
   renderMindSync();
   renderRps();
   renderCatchGame();
+  renderBombGame();
+  renderLikelyGame();
 
   const savedUser = localStorage.getItem('ps_username');
   const savedToken = localStorage.getItem('ps_token');
@@ -403,7 +701,855 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-// ================= SHARED CUSTOM GAME SONGS & FALLBACK SOUNDS =================
+// ================= INSTANT STEALTH / PANIC MODE (TRIPLE-TAP + 0119 + DYNAMIC NOTES) =================
+
+function isStealthOpen() {
+  return Boolean(stealthOverlay && stealthOverlay.style.display !== 'none');
+}
+
+function renderRandomStealthNotes() {
+  if (!stealthNotesList) return;
+  const pool = CS_NOTES_BANK.slice();
+  // Fisher-Yates shuffle for fresh notes every time
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+
+  let selected = pool.slice(0, 5);
+  const sig = selected.map(n => n.title).join('|');
+  if (sig === lastNotesSignature && pool.length >= 10) {
+    selected = pool.slice(5, 10);
+  }
+  lastNotesSignature = selected.map(n => n.title).join('|');
+
+  if (notesTopicTitle) {
+    const subjects = [...new Set(selected.map(n => n.subject))].slice(0, 3).join(', ');
+    notesTopicTitle.textContent = `B.Tech CSE — ${subjects} Notes`;
+  }
+
+  stealthNotesList.innerHTML = '';
+  selected.forEach((item, idx) => {
+    const card = document.createElement('div');
+    card.className = 'note-card';
+    card.innerHTML = `<h4>${idx + 1}. [${escapeHTML(item.subject)}] ${escapeHTML(item.title)}</h4><p>${item.body}</p>`;
+    stealthNotesList.appendChild(card);
+  });
+}
+
+function enterStealthMode() {
+  stopGameSong();
+  pauseYouTubeIframe();
+  if (stealthOverlay) {
+    calcExpr = '0';
+    calcRawSeq = '';
+    if (calcDisplay) calcDisplay.textContent = '0';
+    renderRandomStealthNotes();
+    stealthOverlay.style.display = 'flex';
+    document.title = 'CalcNotes';
+  }
+}
+
+function exitStealthMode() {
+  if (stealthOverlay) {
+    stealthOverlay.style.display = 'none';
+    calcExpr = '0';
+    calcRawSeq = '';
+    if (calcDisplay) calcDisplay.textContent = '0';
+    document.title = 'MINI-WORLD';
+  }
+}
+
+function evaluateBasicCalc(expr) {
+  const tokens = String(expr || '').match(/(\d+\.?\d*|[+\-*/%])/g);
+  if (!tokens || tokens.length === 0) return '0';
+  try {
+    const nums = [];
+    const ops = [];
+    const prec = { '+': 1, '-': 1, '*': 2, '/': 2, '%': 2 };
+    const applyOp = () => {
+      const b = nums.pop();
+      const a = nums.pop();
+      const op = ops.pop();
+      if (a === undefined || b === undefined) return;
+      if (op === '+') nums.push(a + b);
+      else if (op === '-') nums.push(a - b);
+      else if (op === '*') nums.push(a * b);
+      else if (op === '/') nums.push(b === 0 ? 0 : a / b);
+      else if (op === '%') nums.push(b === 0 ? 0 : a % b);
+    };
+
+    for (const tok of tokens) {
+      if (!isNaN(tok)) {
+        nums.push(parseFloat(tok));
+      } else if (prec[tok]) {
+        while (ops.length && prec[ops[ops.length - 1]] >= prec[tok]) {
+          applyOp();
+        }
+        ops.push(tok);
+      }
+    }
+    while (ops.length) applyOp();
+    const res = nums.pop();
+    if (res === undefined || !isFinite(res)) return '0';
+    return String(Number(res.toFixed(6)));
+  } catch (e) {
+    return '0';
+  }
+}
+
+if (stealthPanicBtn) {
+  stealthPanicBtn.addEventListener('click', enterStealthMode);
+}
+
+// Triple-Tap Anywhere on Screen -> Instant Calculator Mode
+let tripleTapCount = 0;
+let tripleTapTimer = null;
+let lastTapX = 0;
+let lastTapY = 0;
+
+document.addEventListener('pointerup', (e) => {
+  if (!e.isPrimary || !currentUser || isStealthOpen()) return;
+  // Do not misfire during rapid-tap games or drawing canvas
+  if (e.target.closest('#bomb-tap-btn, #catch-arena, .watch-react-btn, #doodle-canvas, .hands-touch-pad, #stealth-overlay')) {
+    tripleTapCount = 0;
+    return;
+  }
+
+  const dist = Math.hypot(e.clientX - lastTapX, e.clientY - lastTapY);
+  if (tripleTapCount > 0 && dist > 95) {
+    tripleTapCount = 0;
+  }
+
+  tripleTapCount += 1;
+  lastTapX = e.clientX;
+  lastTapY = e.clientY;
+
+  clearTimeout(tripleTapTimer);
+  if (tripleTapCount >= 3) {
+    tripleTapCount = 0;
+    enterStealthMode();
+  } else {
+    tripleTapTimer = setTimeout(() => {
+      tripleTapCount = 0;
+    }, 460);
+  }
+}, true);
+
+// Keyboard shortcut (Double Escape) for Desktop Stealth Toggle
+let lastEscAt = 0;
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && currentUser) {
+    const now = Date.now();
+    if (now - lastEscAt < 450) {
+      lastEscAt = 0;
+      if (!isStealthOpen()) enterStealthMode();
+      else exitStealthMode();
+    } else {
+      lastEscAt = now;
+    }
+  }
+});
+
+// Backup Unlock: Double-tap "CalcNotes" top title
+if (stealthExitTrigger) {
+  let lastBrandTap = 0;
+  stealthExitTrigger.addEventListener('dblclick', exitStealthMode);
+  stealthExitTrigger.addEventListener('touchend', () => {
+    const now = Date.now();
+    if (now - lastBrandTap > 0 && now - lastBrandTap < 350) {
+      lastBrandTap = 0;
+      exitStealthMode();
+    } else {
+      lastBrandTap = now;
+    }
+  }, { passive: true });
+}
+
+stealthTabs.forEach(tab => {
+  tab.addEventListener('click', () => {
+    stealthTabs.forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    const target = tab.dataset.stab;
+    document.querySelectorAll('.stealth-panel').forEach(p => p.classList.remove('active'));
+    const panel = document.getElementById(`stab-${target}`);
+    if (panel) panel.classList.add('active');
+    if (target === 'notes') renderRandomStealthNotes();
+  });
+});
+
+if (refreshNotesBtn) {
+  refreshNotesBtn.addEventListener('click', renderRandomStealthNotes);
+}
+
+// Calculator Button Handler (Supports Leading 0 so "0119" + "=" Unlocks Properly)
+calcButtons.forEach(btn => {
+  btn.addEventListener('click', () => {
+    const key = btn.dataset.calc;
+    if (!key) return;
+
+    if (key === 'C') {
+      calcExpr = '0';
+      calcRawSeq = '';
+    } else if (key === 'DEL') {
+      if (calcRawSeq.length > 0) calcRawSeq = calcRawSeq.slice(0, -1);
+      calcExpr = calcExpr.length > 1 ? calcExpr.slice(0, -1) : '0';
+    } else if (key === '=') {
+      if (calcRawSeq === '0119' || calcExpr.trim() === '0119') {
+        exitStealthMode();
+        return;
+      }
+      calcExpr = evaluateBasicCalc(calcExpr);
+      calcRawSeq = '';
+    } else {
+      const isOperator = ['+', '-', '*', '/', '%'].includes(key);
+      if (calcRawSeq === '' && calcExpr === '0' && !isOperator && key !== '.') {
+        // First digit pressed after idle '0' — keeps leading '0' if user pressed '0'
+        calcExpr = key;
+        calcRawSeq = key;
+      } else {
+        calcExpr += key;
+        calcRawSeq += key;
+      }
+    }
+
+    if (calcDisplay) calcDisplay.textContent = calcExpr;
+  });
+});
+
+// ================= LIVE SYNCED CHAT THEMES =================
+
+function applyThemeUI(theme) {
+  const safeTheme = THEME_LIST.includes(theme) ? theme : 'rose';
+  currentTheme = safeTheme;
+  document.body.setAttribute('data-theme', safeTheme);
+  themeChips.forEach(chip => {
+    chip.classList.toggle('active', chip.dataset.theme === safeTheme);
+  });
+}
+
+themeChips.forEach(chip => {
+  chip.addEventListener('click', () => {
+    const t = chip.dataset.theme;
+    if (!t) return;
+    applyThemeUI(t);
+    if (activeFriend && socket) {
+      socket.emit('set-theme', { to: activeFriend, theme: t });
+    }
+  });
+});
+
+if (quickThemeBtn) {
+  quickThemeBtn.addEventListener('click', () => {
+    const nextIdx = (THEME_LIST.indexOf(currentTheme) + 1) % THEME_LIST.length;
+    const nextTheme = THEME_LIST[nextIdx];
+    applyThemeUI(nextTheme);
+    if (activeFriend && socket) {
+      socket.emit('set-theme', { to: activeFriend, theme: nextTheme });
+    } else {
+      showToast(`Theme: ${nextTheme.toUpperCase()}`, 'info');
+    }
+  });
+}
+
+// ================= LIVE CHAOS TYPING MODE =================
+
+function applyChaosUI(enabled) {
+  chaosModeEnabled = Boolean(enabled);
+  if (toggleChaosCheckbox) toggleChaosCheckbox.checked = chaosModeEnabled;
+  if (quickChaosBtn) quickChaosBtn.classList.toggle('active', chaosModeEnabled);
+  if (!chaosModeEnabled && chaosLiveBar) {
+    chaosLiveBar.style.display = 'none';
+  }
+}
+
+if (toggleChaosCheckbox) {
+  toggleChaosCheckbox.addEventListener('change', () => {
+    const nextVal = toggleChaosCheckbox.checked;
+    applyChaosUI(nextVal);
+    if (activeFriend && socket) {
+      socket.emit('chaos-toggle', { to: activeFriend, enabled: nextVal });
+    }
+  });
+}
+
+if (quickChaosBtn) {
+  quickChaosBtn.addEventListener('click', () => {
+    if (!activeFriend || !socket) {
+      showToast('Connect with your partner first.', 'error');
+      return;
+    }
+    const nextVal = !chaosModeEnabled;
+    applyChaosUI(nextVal);
+    socket.emit('chaos-toggle', { to: activeFriend, enabled: nextVal });
+  });
+}
+
+// ================= HOLD HANDS LIVE HEARTBEAT SYNC =================
+
+function playHeartbeatThump() {
+  try {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    [0, 0.16].forEach((delay, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      const t = ctx.currentTime + delay;
+      osc.frequency.setValueAtTime(idx === 0 ? 92 : 76, t);
+      osc.frequency.exponentialRampToValueAtTime(38, t + 0.13);
+      gain.gain.setValueAtTime(0.24, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + 0.16);
+    });
+  } catch (e) {}
+}
+
+function stopHandsHeartbeatLoop() {
+  if (handsHeartbeatInterval) {
+    clearInterval(handsHeartbeatInterval);
+    handsHeartbeatInterval = null;
+  }
+}
+
+function renderHandsState(state) {
+  if (!state) return;
+  const holders = Array.isArray(state.holders) ? state.holders : [];
+  const partner = (activeFriend || '').toLowerCase();
+  const partnerHolding = partner && holders.includes(partner);
+  const synced = Boolean(state.synced);
+
+  if (openHandsBtn) openHandsBtn.classList.toggle('active', partnerHolding || synced);
+  if (handsPulseRing) handsPulseRing.classList.toggle('synced', synced);
+  if (handsTouchPad) handsTouchPad.classList.toggle('synced', synced);
+  if (handsEcgWave) handsEcgWave.style.display = synced ? 'block' : 'none';
+
+  if (synced) {
+    if (handsStatusText) handsStatusText.textContent = `💓 You & ${activeFriend || 'Partner'} are holding hands!`;
+    if (!handsHeartbeatInterval) {
+      const pulse = () => {
+        if (userSettings.vibrateEnabled && navigator.vibrate) {
+          navigator.vibrate([110, 90, 140]);
+        }
+        playHeartbeatThump();
+        spawnHeartShower(3);
+      };
+      pulse();
+      handsHeartbeatInterval = setInterval(pulse, 1100);
+    }
+  } else {
+    stopHandsHeartbeatLoop();
+    if (partnerHolding && !isHoldingHand) {
+      if (handsStatusText) handsStatusText.textContent = `🥺 ${activeFriend || 'Partner'} is holding out their hand! Hold now 👇`;
+      if (holdHandsModal && holdHandsModal.style.display === 'none') {
+        showToast(`💓 ${activeFriend || 'Partner'} wants to hold hands! Tap 💓`, 'success');
+      }
+    } else if (isHoldingHand) {
+      if (handsStatusText) handsStatusText.textContent = `Waiting for ${activeFriend || 'Partner'} to hold too...`;
+    } else {
+      if (handsStatusText) handsStatusText.textContent = 'Press & hold together with your partner';
+    }
+  }
+}
+
+function setHandHolding(holding) {
+  if (isHoldingHand === holding) return;
+  isHoldingHand = holding;
+  if (handsTouchPad) handsTouchPad.classList.toggle('holding', holding);
+  if (activeFriend && socket) {
+    socket.emit('hold-hands', { to: activeFriend, holding });
+  }
+}
+
+if (openHandsBtn) {
+  openHandsBtn.addEventListener('click', () => {
+    if (!activeFriend) {
+      showToast('Connect with your partner first.', 'error');
+      return;
+    }
+    holdHandsModal.style.display = 'flex';
+  });
+}
+
+if (closeHandsBtn) {
+  closeHandsBtn.addEventListener('click', () => {
+    setHandHolding(false);
+    stopHandsHeartbeatLoop();
+    holdHandsModal.style.display = 'none';
+  });
+}
+
+if (handsTouchPad) {
+  handsTouchPad.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    handsTouchPad.setPointerCapture(e.pointerId);
+    setHandHolding(true);
+  });
+  const releaseHand = () => setHandHolding(false);
+  handsTouchPad.addEventListener('pointerup', releaseHand);
+  handsTouchPad.addEventListener('pointercancel', releaseHand);
+  handsTouchPad.addEventListener('pointerleave', releaseHand);
+}
+
+// ================= VIRTUAL COUPLE PET (INDEPENDENT NAME PER USER) =================
+
+function renderPetUI() {
+  const moodMap = {
+    happy: { icon: '😊', avatar: '🐱', label: 'Happy 😊' },
+    hungry: { icon: '🥺', avatar: '😿', label: 'Hungry — Feed me! 🐟' },
+    grumpy: { icon: '😤', avatar: '😾', label: 'Grumpy — Play with me! 🧶' },
+    sleepy: { icon: '😴', avatar: '💤', label: 'Sleepy 😴' }
+  };
+  const m = moodMap[petState.mood] || moodMap.happy;
+  const displayName = petState.name || 'Mochi';
+
+  if (petHudName) petHudName.textContent = `🐾 ${displayName}`;
+  if (petHudLevel) petHudLevel.textContent = `Lv.${petState.level || 1}`;
+  if (petHudMood) petHudMood.textContent = m.icon;
+
+  if (petModalTitle) petModalTitle.textContent = `🐾 ${displayName}`;
+  if (petBigAvatar) petBigAvatar.textContent = m.avatar;
+  if (petLevelBadge) petLevelBadge.textContent = `⭐ Level ${petState.level || 1} (${petState.xp || 0}/100 XP)`;
+  if (petStreakBadge) petStreakBadge.textContent = `🔥 ${petState.streak || 1} Day Streak`;
+  if (petMoodText) petMoodText.textContent = `Mood: ${m.label}`;
+
+  const h = Math.max(0, Math.min(100, Number(petState.hunger) || 0));
+  const hap = Math.max(0, Math.min(100, Number(petState.happiness) || 0));
+  if (petHungerBar) petHungerBar.style.width = `${h}%`;
+  if (petHungerVal) petHungerVal.textContent = `${h}%`;
+  if (petHappyBar) petHappyBar.style.width = `${hap}%`;
+  if (petHappyVal) petHappyVal.textContent = `${hap}%`;
+}
+
+if (cuteKittensStage) {
+  cuteKittensStage.addEventListener('click', () => {
+    cuteKittensStage.classList.remove('kitten-jump-boost');
+    void cuteKittensStage.offsetWidth;
+    cuteKittensStage.classList.add('kitten-jump-boost');
+    if (activeFriend && petModal) {
+      renderPetUI();
+      petModal.style.display = 'flex';
+    } else {
+      spawnHeartShower(6);
+    }
+  });
+}
+
+if (closePetBtn) {
+  closePetBtn.addEventListener('click', () => {
+    petModal.style.display = 'none';
+  });
+}
+
+function sendPetAction(action, name) {
+  if (!activeFriend || !socket) return;
+  socket.emit('pet-action', { to: activeFriend, action, name });
+}
+
+if (petFeedBtn) petFeedBtn.addEventListener('click', () => sendPetAction('feed'));
+if (petPlayBtn) petPlayBtn.addEventListener('click', () => sendPetAction('play'));
+if (petCuddleBtn) petCuddleBtn.addEventListener('click', () => sendPetAction('pet'));
+if (petRenameBtn) {
+  petRenameBtn.addEventListener('click', () => {
+    const nextName = (petRenameInput?.value || '').trim();
+    if (!nextName) return;
+    sendPetAction('rename', nextName);
+    petRenameInput.value = '';
+  });
+}
+
+// ================= SHARED STICKY NOTE & COUNTDOWN =================
+
+function updateStickyCountdownDisplay() {
+  if (!stickyCountdownPill) return;
+  if (!stickyState.countdownDate) {
+    stickyCountdownPill.style.display = 'none';
+    return;
+  }
+  const targetMs = new Date(stickyState.countdownDate).getTime();
+  if (isNaN(targetMs)) {
+    stickyCountdownPill.style.display = 'none';
+    return;
+  }
+  const diff = targetMs - Date.now();
+  const prefix = stickyState.countdownTitle ? `${stickyState.countdownTitle}: ` : '⏳ ';
+  stickyCountdownPill.style.display = 'inline-block';
+
+  if (diff <= 0) {
+    stickyCountdownPill.textContent = `${prefix}🎉 Now!`;
+    return;
+  }
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  const hrs = Math.floor((diff / (1000 * 60 * 60)) % 24);
+  const mins = Math.floor((diff / (1000 * 60)) % 60);
+  if (days > 0) stickyCountdownPill.textContent = `${prefix}${days}d ${hrs}h`;
+  else if (hrs > 0) stickyCountdownPill.textContent = `${prefix}${hrs}h ${mins}m`;
+  else stickyCountdownPill.textContent = `${prefix}${mins}m`;
+}
+
+function renderStickyUI() {
+  if (stickyBannerText) {
+    stickyBannerText.textContent = stickyState.note || 'Tap to pin a note or countdown...';
+  }
+  updateStickyCountdownDisplay();
+  clearInterval(stickyCountdownInterval);
+  if (stickyState.countdownDate) {
+    stickyCountdownInterval = setInterval(updateStickyCountdownDisplay, 30000);
+  }
+}
+
+if (stickyBannerBtn) {
+  stickyBannerBtn.addEventListener('click', () => {
+    if (!activeFriend) {
+      showToast('Connect with your partner first.', 'error');
+      return;
+    }
+    if (stickyNoteInput) stickyNoteInput.value = stickyState.note || '';
+    if (stickyCountdownTitle) stickyCountdownTitle.value = stickyState.countdownTitle || '';
+    if (stickyCountdownDate) stickyCountdownDate.value = stickyState.countdownDate || '';
+    stickyModal.style.display = 'flex';
+  });
+}
+
+if (closeStickyBtn) {
+  closeStickyBtn.addEventListener('click', () => {
+    stickyModal.style.display = 'none';
+  });
+}
+
+if (clearCountdownBtn) {
+  clearCountdownBtn.addEventListener('click', () => {
+    if (stickyCountdownTitle) stickyCountdownTitle.value = '';
+    if (stickyCountdownDate) stickyCountdownDate.value = '';
+  });
+}
+
+if (stickyForm) {
+  stickyForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (!activeFriend || !socket) return;
+    socket.emit('sticky-update', {
+      to: activeFriend,
+      note: (stickyNoteInput?.value || '').trim(),
+      countdownTitle: (stickyCountdownTitle?.value || '').trim(),
+      countdownDate: (stickyCountdownDate?.value || '').trim()
+    });
+    stickyModal.style.display = 'none';
+  });
+}
+
+// ================= SECRET SCRATCH, VOICE NOTES & VIEW-ONCE PHOTOS =================
+
+if (secretMsgBtn) {
+  secretMsgBtn.addEventListener('click', () => {
+    isSecretMode = !isSecretMode;
+    secretMsgBtn.classList.toggle('active-secret', isSecretMode);
+    if (messageInput) {
+      messageInput.placeholder = isSecretMode ? '💌 Secret scratch message...' : 'Message';
+      messageInput.focus();
+    }
+  });
+}
+
+function cleanupVoiceRecordingUI() {
+  clearInterval(voiceRecordTimer);
+  voiceRecordTimer = null;
+  if (voiceRecordingBar) voiceRecordingBar.style.display = 'none';
+  if (voiceStream) {
+    voiceStream.getTracks().forEach(t => t.stop());
+    voiceStream = null;
+  }
+  mediaRecorder = null;
+}
+
+async function startVoiceRecording() {
+  if (!activeFriend || !currentUser || !currentAuthToken) return;
+  if (!navigator.mediaDevices || typeof MediaRecorder === 'undefined') {
+    showToast('Voice recording is not supported on this browser.', 'error');
+    return;
+  }
+  if (mediaRecorder && mediaRecorder.state === 'recording') return;
+
+  try {
+    voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mimeCandidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg'];
+    const supportedMime = mimeCandidates.find(m => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) || '';
+
+    mediaRecorder = supportedMime
+      ? new MediaRecorder(voiceStream, { mimeType: supportedMime })
+      : new MediaRecorder(voiceStream);
+
+    voiceChunks = [];
+    voiceCancelled = false;
+    voiceRecordSeconds = 0;
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) voiceChunks.push(e.data);
+    };
+
+    mediaRecorder.onstop = async () => {
+      const wasCancelled = voiceCancelled;
+      const mimeType = mediaRecorder?.mimeType || supportedMime || 'audio/webm';
+      const chunksCopy = voiceChunks.slice();
+      cleanupVoiceRecordingUI();
+
+      if (wasCancelled || chunksCopy.length === 0) return;
+      const blob = new Blob(chunksCopy, { type: mimeType });
+      if (blob.size > 4 * 1024 * 1024) {
+        showToast('Voice note too long (max 4 MB).', 'error');
+        return;
+      }
+      await uploadChatMedia(blob, mimeType, 'voice', 'Voice note');
+    };
+
+    mediaRecorder.start();
+    if (voiceRecordingBar) voiceRecordingBar.style.display = 'flex';
+    if (voiceRecordTimerEl) voiceRecordTimerEl.textContent = '00:00';
+
+    voiceRecordTimer = setInterval(() => {
+      voiceRecordSeconds++;
+      const mins = String(Math.floor(voiceRecordSeconds / 60)).padStart(2, '0');
+      const secs = String(voiceRecordSeconds % 60).padStart(2, '0');
+      if (voiceRecordTimerEl) voiceRecordTimerEl.textContent = `${mins}:${secs}`;
+      if (voiceRecordSeconds >= 90 && mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+      }
+    }, 1000);
+  } catch (err) {
+    cleanupVoiceRecordingUI();
+    showToast('Microphone permission required for voice notes.', 'error');
+  }
+}
+
+if (voiceRecordBtn) voiceRecordBtn.addEventListener('click', startVoiceRecording);
+
+if (voiceCancelBtn) {
+  voiceCancelBtn.addEventListener('click', () => {
+    voiceCancelled = true;
+    if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
+    else cleanupVoiceRecordingUI();
+  });
+}
+
+if (voiceSendBtn) {
+  voiceSendBtn.addEventListener('click', () => {
+    voiceCancelled = false;
+    if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
+  });
+}
+
+function closePhotoPreviewModal() {
+  if (photoPreviewModal) photoPreviewModal.style.display = 'none';
+  if (pendingPhotoPreviewUrl) {
+    URL.revokeObjectURL(pendingPhotoPreviewUrl);
+    pendingPhotoPreviewUrl = null;
+  }
+  pendingPhotoFile = null;
+  if (chatPhotoInput) chatPhotoInput.value = '';
+  if (photoCaptionInput) photoCaptionInput.value = '';
+  if (photoViewOnceCheckbox) photoViewOnceCheckbox.checked = false;
+}
+
+if (photoAttachBtn && chatPhotoInput) {
+  photoAttachBtn.addEventListener('click', () => {
+    if (!activeFriend) return;
+    chatPhotoInput.click();
+  });
+
+  chatPhotoInput.addEventListener('change', () => {
+    const file = chatPhotoInput.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      showToast('Please select an image file.', 'error');
+      chatPhotoInput.value = '';
+      return;
+    }
+    pendingPhotoFile = file;
+    if (pendingPhotoPreviewUrl) URL.revokeObjectURL(pendingPhotoPreviewUrl);
+    pendingPhotoPreviewUrl = URL.createObjectURL(file);
+    if (photoPreviewImg) photoPreviewImg.src = pendingPhotoPreviewUrl;
+    if (photoCaptionInput) photoCaptionInput.value = '';
+    if (photoViewOnceCheckbox) photoViewOnceCheckbox.checked = false;
+    if (photoPreviewModal) photoPreviewModal.style.display = 'flex';
+  });
+}
+
+if (closePhotoPreviewBtn) closePhotoPreviewBtn.addEventListener('click', closePhotoPreviewModal);
+if (cancelPhotoSendBtn) cancelPhotoSendBtn.addEventListener('click', closePhotoPreviewModal);
+
+function compressImageIfNeeded(file) {
+  return new Promise((resolve) => {
+    if (file.size <= 1.2 * 1024 * 1024 || file.type === 'image/gif') {
+      resolve({ blob: file, mime: file.type || 'image/jpeg' });
+      return;
+    }
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const maxDim = 1280;
+      let w = img.width;
+      let h = img.height;
+      if (w > maxDim || h > maxDim) {
+        const scale = Math.min(maxDim / w, maxDim / h);
+        w = Math.round(w * scale);
+        h = Math.round(h * scale);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      canvas.toBlob(
+        (blob) => {
+          if (blob) resolve({ blob, mime: 'image/jpeg' });
+          else resolve({ blob: file, mime: file.type || 'image/jpeg' });
+        },
+        'image/jpeg',
+        0.8
+      );
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve({ blob: file, mime: file.type || 'image/jpeg' });
+    };
+    img.src = url;
+  });
+}
+
+if (confirmPhotoSendBtn) {
+  confirmPhotoSendBtn.addEventListener('click', async () => {
+    if (!pendingPhotoFile || !activeFriend) return;
+    confirmPhotoSendBtn.disabled = true;
+    confirmPhotoSendBtn.textContent = 'Sending...';
+    try {
+      const { blob, mime } = await compressImageIfNeeded(pendingPhotoFile);
+      if (blob.size > 4 * 1024 * 1024) {
+        showToast('Image is too large (max 4 MB).', 'error');
+        return;
+      }
+      const isViewOnce = Boolean(photoViewOnceCheckbox?.checked);
+      const caption = (photoCaptionInput?.value || '').trim();
+      await uploadChatMedia(blob, mime, isViewOnce ? 'view_once' : 'photo', caption);
+      closePhotoPreviewModal();
+    } finally {
+      confirmPhotoSendBtn.disabled = false;
+      confirmPhotoSendBtn.textContent = 'Send';
+    }
+  });
+}
+
+async function uploadChatMedia(blob, mime, mediaType, caption = '') {
+  if (!activeFriend || !currentUser || !currentAuthToken) return;
+  try {
+    const res = await fetch('/chat-media', {
+      method: 'POST',
+      headers: {
+        'Content-Type': mime || 'application/octet-stream',
+        'x-auth-user': encodeURIComponent(currentUser),
+        'x-auth-token': currentAuthToken,
+        'x-media-to': encodeURIComponent(activeFriend),
+        'x-media-type': mediaType,
+        'x-media-caption': encodeURIComponent(caption)
+      },
+      body: blob
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.error || 'Failed to send media.', 'error');
+    }
+  } catch (err) {
+    showToast('Network error sending media.', 'error');
+  }
+}
+
+function getMediaStreamUrl(mediaId) {
+  return `/chat-media/${encodeURIComponent(mediaId)}?u=${encodeURIComponent(currentUser || '')}&t=${encodeURIComponent(currentAuthToken || '')}`;
+}
+
+function closePhotoLightbox() {
+  if (photoLightboxModal) photoLightboxModal.style.display = 'none';
+  if (lightboxImg) lightboxImg.src = '';
+  if (lightboxObjectUrl) {
+    URL.revokeObjectURL(lightboxObjectUrl);
+    lightboxObjectUrl = null;
+  }
+}
+
+if (closeLightboxBtn) closeLightboxBtn.addEventListener('click', closePhotoLightbox);
+
+async function openPhotoLightbox(mediaId, caption, isViewOnce) {
+  if (!mediaId || !photoLightboxModal || !lightboxImg) return;
+  try {
+    if (lightboxObjectUrl) {
+      URL.revokeObjectURL(lightboxObjectUrl);
+      lightboxObjectUrl = null;
+    }
+    const url = getMediaStreamUrl(mediaId);
+    const res = await fetch(url);
+    if (!res.ok) {
+      showToast(isViewOnce ? 'This view-once photo has already expired.' : 'Could not load photo.', 'error');
+      return;
+    }
+    const blob = await res.blob();
+    lightboxObjectUrl = URL.createObjectURL(blob);
+    lightboxImg.src = lightboxObjectUrl;
+    if (lightboxBadge) {
+      lightboxBadge.textContent = isViewOnce ? '🔥 View Once (Expires on close)' : '📷 Photo';
+    }
+    if (lightboxCaption) {
+      lightboxCaption.textContent = caption && caption !== 'Photo' && caption !== 'View-once photo' ? caption : '';
+    }
+    photoLightboxModal.style.display = 'flex';
+
+    if (isViewOnce) {
+      fetch(`/chat-media/${encodeURIComponent(mediaId)}/consume`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-auth-token': currentAuthToken || ''
+        },
+        body: JSON.stringify({ username: currentUser, token: currentAuthToken })
+      }).catch(() => {});
+    }
+  } catch (err) {
+    showToast('Error loading image.', 'error');
+  }
+}
+
+// ================= DEDICATED GAME SETTINGS & CUSTOM GAME SONGS =================
+
+if (openGameSettingsBtn) {
+  openGameSettingsBtn.addEventListener('click', () => {
+    if (gameAudioFeedback) gameAudioFeedback.style.display = 'none';
+    renderGameAudioSettings();
+    if (gameSettingsModal) gameSettingsModal.style.display = 'flex';
+  });
+}
+
+if (closeGameSettingsBtn) {
+  closeGameSettingsBtn.addEventListener('click', () => {
+    stopGameSong();
+    if (gameSettingsModal) gameSettingsModal.style.display = 'none';
+  });
+}
+
+if (winSongFileInput) {
+  winSongFileInput.addEventListener('change', () => {
+    const f = winSongFileInput.files?.[0];
+    if (winSongPickedEl) winSongPickedEl.textContent = f ? f.name : 'No new file';
+  });
+}
+
+if (loseSongFileInput) {
+  loseSongFileInput.addEventListener('change', () => {
+    const f = loseSongFileInput.files?.[0];
+    if (loseSongPickedEl) loseSongPickedEl.textContent = f ? f.name : 'No new file';
+  });
+}
 
 function showGameAudioFeedback(msg, type = 'success') {
   if (!gameAudioFeedback) return;
@@ -415,25 +1561,25 @@ function showGameAudioFeedback(msg, type = 'success') {
 function renderGameAudioSettings() {
   if (winSongStatus) {
     if (gameAudioMeta.win) {
-      winSongStatus.textContent = `🎵 ${gameAudioMeta.win.name} (from ${gameAudioMeta.win.startSec || 0}s • set by ${gameAudioMeta.win.setBy})`;
+      winSongStatus.textContent = `🎵 ${gameAudioMeta.win.name} (${gameAudioMeta.win.startSec || 0}s • ${gameAudioMeta.win.setBy})`;
       if (winSongStartInput && !winSongStartInput.matches(':focus')) {
         winSongStartInput.value = gameAudioMeta.win.startSec || 0;
       }
     } else {
-      winSongStatus.textContent = 'Default victory fanfare';
+      winSongStatus.textContent = 'Default chime';
     }
   }
 
   if (loseSongStatus) {
     if (gameAudioMeta.lose) {
-      loseSongStatus.textContent = `🎵 ${gameAudioMeta.lose.name} (from ${gameAudioMeta.lose.startSec || 0}s • set by ${gameAudioMeta.lose.setBy})`;
+      loseSongStatus.textContent = `🎵 ${gameAudioMeta.lose.name} (${gameAudioMeta.lose.startSec || 0}s • ${gameAudioMeta.lose.setBy})`;
       if (loseSongStartInput && !loseSongStartInput.matches(':focus')) {
         loseSongStartInput.value = gameAudioMeta.lose.startSec || 0;
       }
     } else if (gameAudioMeta.win) {
-      loseSongStatus.textContent = `Shared Win Song will play (${gameAudioMeta.win.name})`;
+      loseSongStatus.textContent = `Uses Win Song`;
     } else {
-      loseSongStatus.textContent = 'Default funny sad trombone';
+      loseSongStatus.textContent = 'Default sound';
     }
   }
 }
@@ -449,16 +1595,11 @@ function stopGameSong() {
     URL.revokeObjectURL(previewObjectUrl);
     previewObjectUrl = null;
   }
-  if (stopGameAudioBtn) {
-    stopGameAudioBtn.style.display = 'none';
-  }
+  if (stopGameAudioBtn) stopGameAudioBtn.style.display = 'none';
 }
 
 gameSongPlayer.addEventListener('ended', stopGameSong);
-
-if (stopGameAudioBtn) {
-  stopGameAudioBtn.addEventListener('click', stopGameSong);
-}
+if (stopGameAudioBtn) stopGameAudioBtn.addEventListener('click', stopGameSong);
 
 function startAudioElementFromSec(srcUrl, startSec = 0) {
   stopGameSong();
@@ -479,11 +1620,10 @@ function startAudioElementFromSec(srcUrl, startSec = 0) {
       playPromise
         .then(() => {
           if (stopGameAudioBtn) stopGameAudioBtn.style.display = 'inline-block';
-          // Auto-stop after 12 seconds so it feels like a crisp game celebration clip
           gameSongStopTimer = setTimeout(stopGameSong, 12000);
         })
         .catch(() => {
-          showToast('Tap anywhere once to allow game song playback.', 'info');
+          showToast('Tap anywhere once to enable song playback.', 'info');
         });
     }
   };
@@ -505,6 +1645,7 @@ function playSyncedGameSong(type) {
 
 async function handleSaveGameSong(type) {
   const fileInput = type === 'win' ? winSongFileInput : loseSongFileInput;
+  const pickedEl = type === 'win' ? winSongPickedEl : loseSongPickedEl;
   const startInput = type === 'win' ? winSongStartInput : loseSongStartInput;
   const saveBtn = type === 'win' ? uploadWinSongBtn : uploadLoseSongBtn;
 
@@ -514,10 +1655,9 @@ async function handleSaveGameSong(type) {
   const startSec = Math.max(0, Math.min(3600, Number(startInput?.value) || 0));
   const file = fileInput?.files?.[0];
 
-  // If no new file chosen, update only startSec for the already-uploaded song
   if (!file) {
     if (!gameAudioMeta[type]) {
-      showGameAudioFeedback('Please select an MP3 or audio file first.', 'error');
+      showGameAudioFeedback('Pick an audio file first.', 'error');
       return;
     }
     try {
@@ -537,7 +1677,7 @@ async function handleSaveGameSong(type) {
       }
       if (data.audio) gameAudioMeta = data.audio;
       renderGameAudioSettings();
-      showGameAudioFeedback('Start time updated for both players!', 'success');
+      showGameAudioFeedback('Start time updated for both players.', 'success');
     } catch (err) {
       showGameAudioFeedback('Network error updating start time.', 'error');
     } finally {
@@ -547,7 +1687,7 @@ async function handleSaveGameSong(type) {
   }
 
   if (file.size > 5 * 1024 * 1024) {
-    showGameAudioFeedback('File is too big! Please pick an audio clip under 5 MB.', 'error');
+    showGameAudioFeedback('Pick an audio clip under 5 MB.', 'error');
     return;
   }
 
@@ -569,13 +1709,14 @@ async function handleSaveGameSong(type) {
     });
     const data = await res.json();
     if (!res.ok) {
-      showGameAudioFeedback(data.error || 'Failed to upload song.', 'error');
+      showGameAudioFeedback(data.error || 'Failed to save song.', 'error');
       return;
     }
     if (data.audio) gameAudioMeta = data.audio;
     fileInput.value = '';
+    if (pickedEl) pickedEl.textContent = 'No new file';
     renderGameAudioSettings();
-    showGameAudioFeedback(`${type === 'win' ? 'Win' : 'Lose'} Song saved! Both players will hear it.`, 'success');
+    showGameAudioFeedback(`${type === 'win' ? 'Win' : 'Lose'} Song saved for both players!`, 'success');
   } catch (err) {
     showGameAudioFeedback('Upload error. Try a smaller MP3 file.', 'error');
   } finally {
@@ -604,21 +1745,20 @@ function handlePreviewGameSong(type) {
     return;
   }
 
-  if (type === 'win') {
-    playRetroWinFanfare();
-  } else {
-    playFunnySadTrombone();
-  }
+  if (type === 'win') playRetroWinFanfare();
+  else playFunnySadTrombone();
 }
 
 async function handleClearGameSong(type) {
   if (!currentUser || !currentAuthToken) return;
   stopGameSong();
   const fileInput = type === 'win' ? winSongFileInput : loseSongFileInput;
+  const pickedEl = type === 'win' ? winSongPickedEl : loseSongPickedEl;
   if (fileInput) fileInput.value = '';
+  if (pickedEl) pickedEl.textContent = 'No new file';
 
   if (!gameAudioMeta[type]) {
-    showGameAudioFeedback('Already using default sound.', 'success');
+    showGameAudioFeedback('Using default sound.', 'success');
     return;
   }
 
@@ -637,7 +1777,7 @@ async function handleClearGameSong(type) {
     }
     if (data.audio) gameAudioMeta = data.audio;
     renderGameAudioSettings();
-    showGameAudioFeedback('Song removed. Reverted to default sound.', 'success');
+    showGameAudioFeedback('Song removed.', 'success');
   } catch (err) {
     showGameAudioFeedback('Network error removing song.', 'error');
   }
@@ -704,17 +1844,12 @@ function playFunnySadTrombone() {
 function triggerGameOutcomeSound(didWin) {
   if (didWin) {
     spawnHeartShower(18);
-    applyDuduAction(3); // Happy Dance!
-    if (!playSyncedGameSong('win')) {
-      playRetroWinFanfare();
-    }
+    applyDuduAction(3);
+    if (!playSyncedGameSong('win')) playRetroWinFanfare();
   } else {
-    applyDuduAction(0); // Playful Bonk!
-    // If Lose Song is set, play Lose Song; else if Win Song is set, play Win Song so both hear it; else sad trombone
+    applyDuduAction(0);
     if (!playSyncedGameSong('lose')) {
-      if (!playSyncedGameSong('win')) {
-        playFunnySadTrombone();
-      }
+      if (!playSyncedGameSong('win')) playFunnySadTrombone();
     }
   }
 }
@@ -731,9 +1866,7 @@ function applyDuduAction(index) {
 }
 
 if (duduActionBtn) {
-  duduActionBtn.addEventListener('click', () => {
-    applyDuduAction(duduActionIndex + 1);
-  });
+  duduActionBtn.addEventListener('click', () => applyDuduAction(duduActionIndex + 1));
 }
 
 function startDuduAutoCycle() {
@@ -778,6 +1911,8 @@ if (openGameModeBtn) {
     renderMindSync();
     renderRps();
     renderCatchGame();
+    renderBombGame();
+    renderLikelyGame();
     gameModeModal.style.display = 'flex';
     startDuduAutoCycle();
     setTimeout(resizeDoodleCanvas, 60);
@@ -789,6 +1924,7 @@ if (closeGameModeBtn) {
     pauseYouTubeIframe();
     stopGameSong();
     stopDuduAutoCycle();
+    if (gameSettingsModal) gameSettingsModal.style.display = 'none';
     gameModeModal.style.display = 'none';
   });
 }
@@ -802,9 +1938,7 @@ gameTabs.forEach(tab => {
     document.querySelectorAll('.game-panel').forEach(p => p.classList.remove('active'));
     const panel = document.getElementById(`gtab-${target}`);
     if (panel) panel.classList.add('active');
-    if (target === 'doodle') {
-      setTimeout(resizeDoodleCanvas, 40);
-    }
+    if (target === 'doodle') setTimeout(resizeDoodleCanvas, 40);
   });
 });
 
@@ -946,9 +2080,7 @@ function renderMindSync() {
   const myAns = mindState.answers?.[me];
   const partnerAns = mindState.answers?.[partner];
 
-  if (mindAnswerInput) {
-    mindAnswerInput.disabled = Boolean(myAns || mindState.revealed);
-  }
+  if (mindAnswerInput) mindAnswerInput.disabled = Boolean(myAns || mindState.revealed);
   if (mindLockBtn) {
     mindLockBtn.disabled = Boolean(myAns || mindState.revealed);
     mindLockBtn.textContent = myAns ? 'Locked ✓' : 'Lock 🔒';
@@ -1061,11 +2193,8 @@ function renderRps() {
       if (rpsState.matchWinner) {
         triggerGameOutcomeSound(rpsState.matchWinner === me);
       } else if (rpsState.lastResult.winnerUser) {
-        if (rpsState.lastResult.winnerUser === me) {
-          playRetroWinFanfare();
-        } else {
-          playFunnySadTrombone();
-        }
+        if (rpsState.lastResult.winnerUser === me) playRetroWinFanfare();
+        else playFunnySadTrombone();
       }
     }
   } else {
@@ -1118,13 +2247,9 @@ function spawnCatchTarget() {
 
   const roll = Math.random();
   let item = { emoji: '💖', delta: 1, color: '#f472b6' };
-  if (roll > 0.82) {
-    item = { emoji: '🌶️', delta: -1, color: '#ef4444' };
-  } else if (roll > 0.66) {
-    item = { emoji: '🌟', delta: 2, color: '#fde047' };
-  } else if (roll > 0.35) {
-    item = { emoji: '🐱', delta: 1, color: '#7dd3fc' };
-  }
+  if (roll > 0.82) item = { emoji: '🌶️', delta: -1, color: '#ef4444' };
+  else if (roll > 0.66) item = { emoji: '🌟', delta: 2, color: '#fde047' };
+  else if (roll > 0.35) item = { emoji: '🐱', delta: 1, color: '#7dd3fc' };
 
   const target = document.createElement('button');
   target.type = 'button';
@@ -1135,7 +2260,7 @@ function spawnCatchTarget() {
 
   const removeTimer = setTimeout(() => target.remove(), 1350);
 
-  const handleTap = (e) => {
+  target.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     clearTimeout(removeTimer);
     if (!catchState.active || !activeFriend || !socket) return;
@@ -1151,9 +2276,8 @@ function spawnCatchTarget() {
 
     target.remove();
     socket.emit('catch-score', { to: activeFriend, delta: item.delta });
-  };
+  });
 
-  target.addEventListener('pointerdown', handleTap);
   catchArena.appendChild(target);
 }
 
@@ -1177,9 +2301,7 @@ function renderCatchGame() {
       catchTimerInterval = setInterval(() => {
         const left = Math.max(0, Math.ceil((catchState.endTime - Date.now()) / 1000));
         catchTimerEl.textContent = String(left);
-        if (left <= 0) {
-          stopCatchBattleLoops();
-        }
+        if (left <= 0) stopCatchBattleLoops();
       }, 250);
     }
   } else {
@@ -1217,7 +2339,176 @@ if (catchStartBtn) {
   });
 }
 
-// ================= GAME 5: WATCH TOGETHER + LIVE REACTIONS =================
+// ================= GAME 5: HOT POTATO / BOMB PASS =================
+
+function renderBombGame() {
+  if (!bombStatusBanner || !bombTapBtn || !bombIcon || !bombTapProgress) return;
+  const me = (currentUser || '').toLowerCase();
+
+  if (bombPassesPill) bombPassesPill.textContent = `💣 Passes: ${bombState.passes || 0}`;
+  bombTapBtn.classList.remove('hot', 'exploded');
+
+  if (bombState.active) {
+    const iHoldIt = bombState.holder === me;
+    if (bombDareCard) bombDareCard.style.display = 'none';
+    if (bombStartBtn) bombStartBtn.style.display = 'none';
+
+    if (iHoldIt) {
+      bombTapBtn.disabled = false;
+      bombTapBtn.classList.add('hot');
+      bombIcon.textContent = '💣';
+      const remaining = Math.max(1, (bombState.tapsNeeded || 5) - (bombState.tapsDone || 0));
+      bombTapProgress.textContent = `TAP ${remaining}x TO PASS!`;
+      bombStatusBanner.textContent = '🔥 YOU HAVE THE BOMB! TAP FAST!';
+      if (userSettings.vibrateEnabled && navigator.vibrate) navigator.vibrate(45);
+    } else {
+      bombTapBtn.disabled = true;
+      bombIcon.textContent = '😅';
+      bombTapProgress.textContent = `${bombState.holderName || 'Partner'} has it`;
+      bombStatusBanner.textContent = `⏳ Safe! ${bombState.holderName || 'Partner'} is frantically tapping...`;
+    }
+  } else {
+    bombTapBtn.disabled = true;
+    if (bombStartBtn) bombStartBtn.style.display = 'block';
+
+    if (bombState.explodedOn) {
+      const explodedOnMe = bombState.explodedOn === me;
+      bombTapBtn.classList.add('exploded');
+      bombIcon.textContent = '💥';
+      bombTapProgress.textContent = explodedOnMe ? 'BOOM ON YOU!' : `BOOM ON ${bombState.explodedName || 'PARTNER'}!`;
+      bombStatusBanner.textContent = explodedOnMe
+        ? '💥 BOOM! It exploded in your hands!'
+        : `🎉 Survived! It exploded on ${bombState.explodedName || 'Partner'}!`;
+
+      if (bombDareCard && bombDareText && bombState.dare) {
+        bombDareText.textContent = bombState.dare;
+        bombDareCard.style.display = 'block';
+      }
+      if (bombStartBtn) bombStartBtn.textContent = 'Play Again 🔥';
+
+      if (bombState.roundId && bombState.roundId !== lastAnnouncedBombId) {
+        lastAnnouncedBombId = bombState.roundId;
+        triggerGameOutcomeSound(!explodedOnMe);
+      }
+    } else {
+      bombIcon.textContent = '💣';
+      bombTapProgress.textContent = 'Ready';
+      bombStatusBanner.textContent = 'Tap Start to light the fuse!';
+      if (bombDareCard) bombDareCard.style.display = 'none';
+      if (bombStartBtn) bombStartBtn.textContent = 'Light Bomb 🔥';
+    }
+  }
+}
+
+if (bombStartBtn) {
+  bombStartBtn.addEventListener('click', () => {
+    if (!activeFriend || !socket) return;
+    stopGameSong();
+    socket.emit('bomb-start', { to: activeFriend });
+  });
+}
+
+if (bombTapBtn) {
+  bombTapBtn.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    if (!activeFriend || !socket || !bombState.active) return;
+    socket.emit('bomb-tap', { to: activeFriend });
+  });
+}
+
+// ================= GAME 6: WHO'S MORE LIKELY TO? QUIZ =================
+
+function renderLikelyGame() {
+  if (!likelyQuestionText || !likelyPickMeBtn || !likelyPickPartnerBtn || !likelyStatusBanner || !likelyRevealArea) return;
+  const me = (currentUser || '').toLowerCase();
+  const partner = (activeFriend || '').toLowerCase();
+
+  const qText = likelyState.customQuestion || likelyQuestions[likelyState.questionIndex % likelyQuestions.length];
+  likelyQuestionText.textContent = qText;
+  if (likelyCompatBadge) {
+    likelyCompatBadge.textContent = `💘 Compatibility: ${likelyState.compatibility ?? 100}% (${likelyState.matchCount || 0}/${likelyState.totalRounds || 0})`;
+  }
+
+  const myName = currentUser || 'You';
+  const partnerName = activeFriend || 'Partner';
+  likelyPickMeBtn.textContent = myName;
+  likelyPickPartnerBtn.textContent = partnerName;
+
+  const myVote = likelyState.picks?.[me];
+  const partnerVote = likelyState.picks?.[partner];
+
+  likelyPickMeBtn.classList.toggle('picked', myVote?.picked?.toLowerCase() === me);
+  likelyPickPartnerBtn.classList.toggle('picked', myVote?.picked?.toLowerCase() === partner);
+  likelyPickMeBtn.disabled = Boolean(myVote || likelyState.revealed);
+  likelyPickPartnerBtn.disabled = Boolean(myVote || likelyState.revealed);
+
+  likelyRevealArea.innerHTML = '';
+
+  if (likelyState.revealed) {
+    const c1 = document.createElement('div');
+    c1.className = `mind-reveal-card ${likelyState.matched ? 'matched' : ''}`;
+    c1.innerHTML = `<small>You voted</small><strong>${escapeHTML(myVote?.picked || '—')}</strong>`;
+
+    const c2 = document.createElement('div');
+    c2.className = `mind-reveal-card ${likelyState.matched ? 'matched' : ''}`;
+    c2.innerHTML = `<small>${escapeHTML(partnerName)} voted</small><strong>${escapeHTML(partnerVote?.picked || '—')}</strong>`;
+
+    likelyRevealArea.appendChild(c1);
+    likelyRevealArea.appendChild(c2);
+
+    likelyStatusBanner.textContent = likelyState.matched
+      ? `💖 100% Agreed! Both picked ${myVote?.picked || ''}!`
+      : '😂 You both pointed at different people!';
+
+    const key = `${likelyState.questionIndex}-${likelyState.customQuestion || ''}-${likelyState.totalRounds}`;
+    if (lastAnnouncedLikelyKey !== key) {
+      lastAnnouncedLikelyKey = key;
+      triggerGameOutcomeSound(Boolean(likelyState.matched));
+    }
+  } else if (myVote && !partnerVote) {
+    likelyStatusBanner.textContent = `Vote locked 🔒 — waiting for ${partnerName}...`;
+  } else if (!myVote && partnerVote) {
+    likelyStatusBanner.textContent = `${partnerName} voted! Pick your answer 👇`;
+  } else {
+    likelyStatusBanner.textContent = 'Secretly vote who fits best!';
+  }
+}
+
+if (likelyPickMeBtn) {
+  likelyPickMeBtn.addEventListener('click', () => {
+    if (!activeFriend || !socket || !currentUser) return;
+    socket.emit('likely-pick', { to: activeFriend, pickUser: currentUser });
+  });
+}
+
+if (likelyPickPartnerBtn) {
+  likelyPickPartnerBtn.addEventListener('click', () => {
+    if (!activeFriend || !socket) return;
+    socket.emit('likely-pick', { to: activeFriend, pickUser: activeFriend });
+  });
+}
+
+if (likelyCustomBtn) {
+  likelyCustomBtn.addEventListener('click', () => {
+    if (!activeFriend || !socket) return;
+    const custom = (likelyCustomInput?.value || '').trim();
+    if (!custom) return;
+    stopGameSong();
+    socket.emit('likely-next', { to: activeFriend, customQuestion: custom });
+    likelyCustomInput.value = '';
+  });
+}
+
+if (likelyNextBtn) {
+  likelyNextBtn.addEventListener('click', () => {
+    if (!activeFriend || !socket) return;
+    stopGameSong();
+    const nextIdx = (likelyState.questionIndex + 1) % likelyQuestions.length;
+    socket.emit('likely-next', { to: activeFriend, questionIndex: nextIdx });
+  });
+}
+
+// ================= GAME 7: WATCH TOGETHER + LIVE REACTIONS =================
 
 function extractYouTubeId(rawInput) {
   const val = String(rawInput || '').trim();
@@ -1233,9 +2524,7 @@ function applyYouTubeVideo(videoId) {
   if (ytIframe) {
     ytIframe.style.display = 'block';
     const nextSrc = `https://www.youtube.com/embed/${videoId}?enablejsapi=1&autoplay=0&rel=0`;
-    if (ytIframe.src !== nextSrc) {
-      ytIframe.src = nextSrc;
-    }
+    if (ytIframe.src !== nextSrc) ytIframe.src = nextSrc;
   }
 }
 
@@ -1272,7 +2561,7 @@ watchReactButtons.forEach(btn => {
   });
 });
 
-// ================= GAME 6: SHARED LIVE DOODLE CANVAS =================
+// ================= GAME 8: SHARED LIVE DOODLE CANVAS =================
 
 function drawDoodleSegment(seg) {
   if (!doodleCtx || !doodleCanvas || !doodleCanvas.width || !doodleCanvas.height) return;
@@ -1377,23 +2666,9 @@ if (doodleClearBtn) {
   });
 }
 
-// ================= INTERACTIVE PLAYING KITTENS =================
+// ================= THEME-REACTIVE CANVAS PARTICLE ENGINE =================
 
-if (cuteKittensStage) {
-  cuteKittensStage.addEventListener('click', () => {
-    cuteKittensStage.classList.remove('kitten-jump-boost');
-    void cuteKittensStage.offsetWidth;
-    cuteKittensStage.classList.add('kitten-jump-boost');
-    spawnHeartShower(6);
-    if (activeFriend && socket) {
-      socket.emit('heart-shower', { to: activeFriend });
-    }
-  });
-}
-
-// ================= SHARED CANVAS PARTICLE ENGINE (BATTERY-FRIENDLY) =================
-
-function mountParticleCanvas(canvasId, hueStart, hueRange, glowColor, isActiveCheck) {
+function mountParticleCanvas(canvasId, isMainThemeCanvas, isActiveCheck) {
   const canvas = document.getElementById(canvasId);
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
@@ -1412,21 +2687,22 @@ function mountParticleCanvas(canvasId, hueStart, hueRange, glowColor, isActiveCh
   const particles = [];
   const sparkles = [];
   const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-  const totalParticles = window.innerWidth < 768 ? 32 : 52;
+  const totalParticles = window.innerWidth < 768 ? 36 : 58;
 
   function createParticle(randomY = true) {
     const isHeart = Math.random() < 0.44;
     return {
       x: Math.random() * width,
-      y: randomY ? Math.random() * height : height + 25,
-      size: isHeart ? 8 + Math.random() * 11 : 1.6 + Math.random() * 3,
-      speedY: 0.25 + Math.random() * 0.55,
-      swayAmp: 0.3 + Math.random() * 0.8,
-      swaySpeed: 0.008 + Math.random() * 0.018,
+      y: randomY ? Math.random() * height : (isMainThemeCanvas && (currentTheme === 'rain' || currentTheme === 'sakura') ? -20 : height + 25),
+      size: isHeart ? 8 + Math.random() * 10 : 1.8 + Math.random() * 2.8,
+      speedY: 0.3 + Math.random() * 0.65,
+      rainSpeed: 4.5 + Math.random() * 5.5,
+      swayAmp: 0.3 + Math.random() * 0.85,
+      swaySpeed: 0.01 + Math.random() * 0.02,
       phase: Math.random() * Math.PI * 2,
-      alpha: 0.24 + Math.random() * 0.55,
+      alpha: 0.25 + Math.random() * 0.55,
       isHeart,
-      hue: hueStart + Math.random() * hueRange
+      hueOffset: Math.random()
     };
   }
 
@@ -1439,28 +2715,24 @@ function mountParticleCanvas(canvasId, hueStart, hueRange, glowColor, isActiveCh
     const topCurveHeight = size * 0.3;
     ctx.moveTo(x, y + topCurveHeight);
     ctx.bezierCurveTo(x, y, x - size / 2, y, x - size / 2, y + topCurveHeight);
-    ctx.bezierCurveTo(
-      x - size / 2,
-      y + (size + topCurveHeight) / 2,
-      x,
-      y + (size + topCurveHeight) / 1.45,
-      x,
-      y + size
-    );
-    ctx.bezierCurveTo(
-      x,
-      y + (size + topCurveHeight) / 1.45,
-      x + size / 2,
-      y + (size + topCurveHeight) / 2,
-      x + size / 2,
-      y + topCurveHeight
-    );
+    ctx.bezierCurveTo(x - size / 2, y + (size + topCurveHeight) / 2, x, y + (size + topCurveHeight) / 1.45, x, y + size);
+    ctx.bezierCurveTo(x, y + (size + topCurveHeight) / 1.45, x + size / 2, y + (size + topCurveHeight) / 2, x + size / 2, y + topCurveHeight);
     ctx.bezierCurveTo(x + size / 2, y, x, y, x, y + topCurveHeight);
     ctx.closePath();
   }
 
+  function getThemePalette() {
+    if (!isMainThemeCanvas) return { hueStart: 192, hueRange: 26, glow: 'rgba(56, 189, 248, 0.85)' };
+    if (currentTheme === 'rain') return { hueStart: 195, hueRange: 25, glow: 'rgba(56, 189, 248, 0.85)' };
+    if (currentTheme === 'galaxy') return { hueStart: 250, hueRange: 50, glow: 'rgba(167, 139, 250, 0.9)' };
+    if (currentTheme === 'sakura') return { hueStart: 335, hueRange: 20, glow: 'rgba(251, 113, 133, 0.85)' };
+    if (currentTheme === 'sunset') return { hueStart: 18, hueRange: 34, glow: 'rgba(251, 146, 60, 0.85)' };
+    return { hueStart: 315, hueRange: 45, glow: 'rgba(244, 114, 182, 0.85)' };
+  }
+
   const addSparkle = (x, y, burstCount = 1) => {
     if (!isActiveCheck()) return;
+    const pal = getThemePalette();
     const maxCap = isTouchDevice ? 55 : 36;
     for (let k = 0; k < burstCount; k++) {
       if (sparkles.length >= maxCap) break;
@@ -1471,14 +2743,15 @@ function mountParticleCanvas(canvasId, hueStart, hueRange, glowColor, isActiveCh
         size: baseSize,
         alpha: 0.95,
         vy: -0.65 - Math.random() * 0.85,
-        hue: hueStart + Math.random() * hueRange
+        hue: pal.hueStart + Math.random() * pal.hueRange,
+        glow: pal.glow
       });
     }
   };
 
   let lastTouchSparkleAt = 0;
   window.addEventListener('mousemove', (e) => {
-    if (Math.random() < 0.32) addSparkle(e.clientX, e.clientY, 1);
+    if (Math.random() < 0.3) addSparkle(e.clientX, e.clientY, 1);
   });
 
   window.addEventListener('touchstart', (e) => {
@@ -1502,10 +2775,50 @@ function mountParticleCanvas(canvasId, hueStart, hueRange, glowColor, isActiveCh
     }
     ctx.clearRect(0, 0, width, height);
 
+    const pal = getThemePalette();
+    const mode = isMainThemeCanvas ? currentTheme : 'sky';
+
     for (let i = 0; i < particles.length; i++) {
       const p = particles[i];
-      p.y -= p.speedY;
       p.phase += p.swaySpeed;
+
+      if (mode === 'rain') {
+        p.y += p.rainSpeed;
+        p.x -= 0.7;
+        if (p.y > height + 20 || p.x < -10) {
+          p.x = Math.random() * (width + 60);
+          p.y = -20;
+        }
+        ctx.save();
+        ctx.strokeStyle = `rgba(125, 211, 252, ${p.alpha * 0.85})`;
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(p.x - 3, p.y + 14);
+        ctx.stroke();
+        ctx.restore();
+        continue;
+      }
+
+      if (mode === 'sakura') {
+        p.y += p.speedY * 1.3;
+        p.x += Math.sin(p.phase) * 1.1;
+        if (p.y > height + 20) {
+          p.y = -20;
+          p.x = Math.random() * width;
+        }
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.phase);
+        ctx.fillStyle = `rgba(253, 164, 175, ${p.alpha})`;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, p.size * 0.65, p.size * 0.35, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        continue;
+      }
+
+      p.y -= mode === 'galaxy' ? p.speedY * 0.25 : p.speedY;
       p.x += Math.sin(p.phase) * p.swayAmp;
 
       if (p.y < -30) {
@@ -1513,19 +2826,20 @@ function mountParticleCanvas(canvasId, hueStart, hueRange, glowColor, isActiveCh
         continue;
       }
 
-      const twinkle = 0.75 + 0.25 * Math.sin(p.phase * 2);
+      const hue = pal.hueStart + p.hueOffset * pal.hueRange;
+      const twinkle = 0.7 + 0.3 * Math.sin(p.phase * 2.2);
       ctx.save();
-      if (p.isHeart) {
-        ctx.fillStyle = `hsla(${p.hue}, 90%, 72%, ${p.alpha * twinkle})`;
-        ctx.shadowColor = `hsla(${p.hue}, 95%, 65%, 0.55)`;
+      if (p.isHeart && mode !== 'galaxy') {
+        ctx.fillStyle = `hsla(${hue}, 90%, 72%, ${p.alpha * twinkle})`;
+        ctx.shadowColor = `hsla(${hue}, 95%, 65%, 0.55)`;
         ctx.shadowBlur = 10;
         drawHeartPath(p.x, p.y, p.size);
         ctx.fill();
       } else {
         ctx.beginPath();
-        ctx.fillStyle = `hsla(${hueStart + 10}, 100%, 88%, ${p.alpha * twinkle})`;
-        ctx.shadowColor = glowColor;
-        ctx.shadowBlur = 8;
+        ctx.fillStyle = `hsla(${hue}, 100%, 88%, ${p.alpha * twinkle})`;
+        ctx.shadowColor = pal.glow;
+        ctx.shadowBlur = mode === 'galaxy' ? 12 : 8;
         ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
         ctx.fill();
       }
@@ -1542,7 +2856,7 @@ function mountParticleCanvas(canvasId, hueStart, hueRange, glowColor, isActiveCh
       }
       ctx.save();
       ctx.fillStyle = `hsla(${s.hue}, 95%, 74%, ${s.alpha})`;
-      ctx.shadowColor = glowColor;
+      ctx.shadowColor = s.glow;
       ctx.shadowBlur = 10;
       drawHeartPath(s.x, s.y, s.size);
       ctx.fill();
@@ -1554,11 +2868,11 @@ function mountParticleCanvas(canvasId, hueStart, hueRange, glowColor, isActiveCh
 }
 
 function initRomanticBackgroundCanvas() {
-  mountParticleCanvas('romantic-bg-canvas', 315, 45, 'rgba(244, 114, 182, 0.85)', () => !isGameModeOpen());
+  mountParticleCanvas('romantic-bg-canvas', true, () => !isGameModeOpen() && !isStealthOpen());
 }
 
 function initGameModeCanvas() {
-  mountParticleCanvas('game-mode-canvas', 192, 26, 'rgba(56, 189, 248, 0.85)', () => isGameModeOpen());
+  mountParticleCanvas('game-mode-canvas', false, () => isGameModeOpen() && !isStealthOpen());
 }
 
 // ================= FLOATING HEART SHOWER =================
@@ -1632,7 +2946,7 @@ function urlBase64ToUint8Array(base64String) {
 
 async function syncPushSubscription(isManualClick = false) {
   if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
-    if (isManualClick) showToast('Push notifications are not supported on this browser.', 'error');
+    if (isManualClick) showToast('Push alerts not supported on this browser.', 'error');
     return;
   }
 
@@ -1647,7 +2961,7 @@ async function syncPushSubscription(isManualClick = false) {
 
     if (perm !== 'granted') {
       enablePushBtn.textContent = 'Enable';
-      if (pushStatusDesc) pushStatusDesc.textContent = 'Receive alerts even when browser is closed';
+      if (pushStatusDesc) pushStatusDesc.textContent = 'Notify when app is closed';
       if (isManualClick) {
         showToast('Please allow notification permission in browser settings.', 'error');
       }
@@ -1685,14 +2999,14 @@ async function syncPushSubscription(isManualClick = false) {
       body: JSON.stringify({ username: currentUser, token: currentAuthToken, subscription: sub })
     });
 
-    enablePushBtn.textContent = 'Active • Test';
+    enablePushBtn.textContent = 'Test';
     enablePushBtn.disabled = false;
     if (pushStatusDesc) {
-      pushStatusDesc.textContent = 'Enabled! Tap button anytime to send a test alert';
+      pushStatusDesc.textContent = 'Active — tap to test';
     }
 
     if (isManualClick) {
-      showToast('Sending test background notification...', 'success');
+      showToast('Sending test notification...', 'success');
       const testRes = await fetch('/test-push', {
         method: 'POST',
         headers: {
@@ -1712,7 +3026,7 @@ async function syncPushSubscription(isManualClick = false) {
   } catch (err) {
     console.error('Push setup error:', err);
     if (isManualClick) {
-      showToast('Notification error: ' + (err.message || 'Check browser permissions'), 'error');
+      showToast('Notification error: ' + (err.message || 'Check permissions'), 'error');
     }
   }
 }
@@ -1983,6 +3297,13 @@ function forceLogoutToAuth(msg) {
   stopGameSong();
   stopCatchBattleLoops();
   stopDuduAutoCycle();
+  stopHandsHeartbeatLoop();
+  cleanupVoiceRecordingUI();
+  closePhotoPreviewModal();
+  closePhotoLightbox();
+  exitStealthMode();
+  setHandHolding(false);
+
   if (socket) {
     socket.disconnect();
     socket = null;
@@ -1992,6 +3313,8 @@ function forceLogoutToAuth(msg) {
   currentUser = null;
   currentAuthToken = null;
   activeFriend = null;
+  isSecretMode = false;
+  if (secretMsgBtn) secretMsgBtn.classList.remove('active-secret');
   clearReplyPreview();
   messagesList.innerHTML = '';
   if (ytIframe) {
@@ -2005,8 +3328,13 @@ function forceLogoutToAuth(msg) {
   gameAudioMeta = { win: null, lose: null };
   renderGameAudioSettings();
   if (liveTypingPill) liveTypingPill.style.display = 'none';
+  if (chaosLiveBar) chaosLiveBar.style.display = 'none';
   settingsModal.style.display = 'none';
+  if (gameSettingsModal) gameSettingsModal.style.display = 'none';
   if (gameModeModal) gameModeModal.style.display = 'none';
+  if (holdHandsModal) holdHandsModal.style.display = 'none';
+  if (petModal) petModal.style.display = 'none';
+  if (stickyModal) stickyModal.style.display = 'none';
   if (deleteAccountInlineForm) deleteAccountInlineForm.style.display = 'none';
   chatContainer.style.display = 'none';
   authContainer.style.display = 'flex';
@@ -2017,19 +3345,18 @@ function forceLogoutToAuth(msg) {
 
 logoutBtn.addEventListener('click', () => forceLogoutToAuth());
 
-// ================= SETTINGS =================
+// ================= APP SETTINGS =================
 
 function openSettings() {
   cpFeedback.style.display = 'none';
-  if (gameAudioFeedback) gameAudioFeedback.style.display = 'none';
   if (daFeedback) daFeedback.style.display = 'none';
   if (deleteAccountInlineForm) deleteAccountInlineForm.style.display = 'none';
-  renderGameAudioSettings();
+  applyThemeUI(currentTheme);
+  applyChaosUI(chaosModeEnabled);
   settingsModal.style.display = 'flex';
 }
 
 function closeSettings() {
-  stopGameSong();
   settingsModal.style.display = 'none';
 }
 
@@ -2066,14 +3393,14 @@ clearChatBtn.addEventListener('click', async () => {
     return;
   }
   const confirmed = await showAppConfirm({
-    title: 'Clear Chat History',
+    title: 'Clear Chat',
     message: `Delete all messages with ${activeFriend} for both of you?`,
     confirmText: 'Clear All'
   });
   if (confirmed && socket) {
     socket.emit('clear-chat', { friend: activeFriend });
     closeSettings();
-    showToast('Chat history cleared.', 'success');
+    showToast('Chat cleared.', 'success');
   }
 });
 
@@ -2083,9 +3410,7 @@ if (deleteMyAccountBtn && deleteAccountInlineForm) {
     daPinOrPass.value = '';
     deleteAccountInlineForm.style.display =
       deleteAccountInlineForm.style.display === 'none' ? 'flex' : 'none';
-    if (deleteAccountInlineForm.style.display === 'flex') {
-      daPinOrPass.focus();
-    }
+    if (deleteAccountInlineForm.style.display === 'flex') daPinOrPass.focus();
   });
 
   cancelInlineDeleteBtn.addEventListener('click', () => {
@@ -2242,18 +3567,92 @@ function connectSocket() {
     if (message) showToast(message, type || 'info');
   });
 
-  // Sync Custom Game Songs across both players live
+  socket.on('app-extras-sync', (extras) => {
+    if (!extras) return;
+    if (extras.theme) applyThemeUI(extras.theme);
+    if (typeof extras.chaosMode === 'boolean') applyChaosUI(extras.chaosMode);
+    if (extras.hands) renderHandsState(extras.hands);
+    if (extras.pet) {
+      petState = extras.pet;
+      renderPetUI();
+    }
+    if (extras.sticky) {
+      stickyState = extras.sticky;
+      renderStickyUI();
+    }
+  });
+
+  socket.on('theme-sync', ({ theme, by } = {}) => {
+    if (theme) {
+      applyThemeUI(theme);
+      if (by && by.toLowerCase() !== (currentUser || '').toLowerCase()) {
+        showToast(`🎨 ${by} switched theme to ${theme.toUpperCase()}`, 'info');
+      }
+    }
+  });
+
+  socket.on('chaos-state', ({ enabled, by } = {}) => {
+    applyChaosUI(enabled);
+    if (by && by.toLowerCase() !== (currentUser || '').toLowerCase()) {
+      showToast(`👀 ${by} turned Live Typing ${enabled ? 'ON' : 'OFF'}`, 'info');
+    }
+  });
+
+  socket.on('chaos-draft', ({ from, text } = {}) => {
+    if (!chaosModeEnabled || !chaosLiveBar || !chaosLiveUser || !chaosLiveText) return;
+    if (!text) {
+      chaosLiveBar.style.display = 'none';
+      return;
+    }
+    chaosLiveUser.textContent = `${from}:`;
+    chaosLiveText.textContent = text;
+    chaosLiveBar.style.display = 'flex';
+    clearTimeout(chaosHideTimer);
+    chaosHideTimer = setTimeout(() => {
+      if (chaosLiveBar) chaosLiveBar.style.display = 'none';
+    }, 5000);
+  });
+
+  socket.on('hold-hands-state', (state) => renderHandsState(state));
+
+  socket.on('pet-state', ({ pet, note } = {}) => {
+    if (pet) {
+      petState = pet;
+      renderPetUI();
+    }
+    if (note) {
+      showToast(note, 'success');
+      spawnHeartShower(6);
+    }
+  });
+
+  socket.on('sticky-state', (sticky) => {
+    if (!sticky) return;
+    stickyState = sticky;
+    renderStickyUI();
+    if (sticky.updatedBy && sticky.updatedBy.toLowerCase() !== (currentUser || '').toLowerCase()) {
+      showToast(`📌 ${sticky.updatedBy} updated the sticky note!`, 'info');
+    }
+  });
+
+  socket.on('media-viewed', ({ mediaId } = {}) => {
+    if (!mediaId) return;
+    const btn = document.querySelector(`.view-once-btn[data-media-id="${mediaId}"]`);
+    if (btn) {
+      btn.classList.add('opened');
+      btn.disabled = true;
+      btn.innerHTML = '<span>💨</span> <span>Opened</span>';
+    }
+  });
+
   socket.on('game-audio-sync', ({ audio, notifyText } = {}) => {
     if (audio) {
       gameAudioMeta = audio;
       renderGameAudioSettings();
     }
-    if (notifyText) {
-      showToast(notifyText, 'success');
-    }
+    if (notifyText) showToast(notifyText, 'success');
   });
 
-  // Hydrate all 6 Game Mode modules + Custom Songs on initial connection
   socket.on('game-sync-state', (state) => {
     if (!state) return;
     if (state.gameAudio) {
@@ -2279,16 +3678,22 @@ function connectSocket() {
       lastAnnouncedCatchEnd = catchState.endTime || 0;
       renderCatchGame();
     }
-    if (state.ytVideoId) {
-      applyYouTubeVideo(state.ytVideoId);
+    if (state.bomb) {
+      bombState = state.bomb;
+      lastAnnouncedBombId = bombState.roundId || 0;
+      renderBombGame();
     }
+    if (state.likely) {
+      likelyState = state.likely;
+      renderLikelyGame();
+    }
+    if (state.ytVideoId) applyYouTubeVideo(state.ytVideoId);
     if (Array.isArray(state.doodleStrokes)) {
       doodleStrokes = state.doodleStrokes;
       redrawAllDoodleStrokes();
     }
   });
 
-  // Live Game Listeners
   socket.on('ttt-state', (state) => {
     tttMovePending = false;
     if (!state) return;
@@ -2317,6 +3722,19 @@ function connectSocket() {
     renderCatchGame();
   });
 
+  socket.on('bomb-state', (state) => {
+    if (!state) return;
+    bombState = state;
+    renderBombGame();
+  });
+
+  socket.on('likely-state', (state) => {
+    if (!state) return;
+    likelyState = state;
+    if (!likelyState.revealed) lastAnnouncedLikelyKey = null;
+    renderLikelyGame();
+  });
+
   socket.on('yt-sync', ({ from, videoId }) => {
     if (videoId) {
       applyYouTubeVideo(videoId);
@@ -2342,7 +3760,6 @@ function connectSocket() {
     redrawAllDoodleStrokes();
   });
 
-  // Social & Chat Listeners
   socket.on('social-data', (data) => {
     socialState = data;
     renderSocialLists();
@@ -2358,12 +3775,15 @@ function connectSocket() {
         hideRemoteTypingUI();
         emptyChatState.style.display = 'block';
         headerCallActions.style.display = 'none';
-        if (heartShowerBtn) heartShowerBtn.disabled = true;
+        [heartShowerBtn, secretMsgBtn, photoAttachBtn, voiceRecordBtn, messageInput, sendBtn].forEach(el => {
+          if (el) el.disabled = true;
+        });
         headerTitle.textContent = 'MINI-WORLD';
         headerSubtitle.textContent = 'Waiting for your partner...';
       } else {
         updateActiveFriendHeader();
         renderTicTacToe();
+        renderLikelyGame();
       }
     }
   });
@@ -2385,12 +3805,16 @@ function connectSocket() {
 
     if (!isMine) {
       hideRemoteTypingUI();
+      if (chaosLiveBar) chaosLiveBar.style.display = 'none';
       playMessageBeep();
       if (userSettings.vibrateEnabled && navigator.vibrate) {
         navigator.vibrate(150);
       }
       if (document.hidden || !document.hasFocus()) {
-        triggerBackgroundOSNotification(msg.username, msg.text, `chat-${msg.username}`);
+        const previewBody = msg.msg_type === 'secret'
+          ? '💌 Sent a secret scratch message'
+          : (msg.msg_type === 'voice' ? '🎙️ Sent a voice note' : (msg.msg_type === 'view_once' ? '🔥 Sent a view-once photo' : msg.text));
+        triggerBackgroundOSNotification(msg.username, previewBody, `chat-${msg.username}`);
       }
     }
 
@@ -2403,9 +3827,7 @@ function connectSocket() {
     }
   });
 
-  socket.on('heart-shower', () => {
-    spawnHeartShower(16);
-  });
+  socket.on('heart-shower', () => spawnHeartShower(16));
 
   socket.on('messages-seen', ({ by }) => {
     if (!activeFriend || by.toLowerCase() !== activeFriend.toLowerCase()) return;
@@ -2480,9 +3902,7 @@ function connectSocket() {
 }
 
 window.addEventListener('focus', () => {
-  if (activeFriend && socket) {
-    socket.emit('mark-seen', { friend: activeFriend });
-  }
+  if (activeFriend && socket) socket.emit('mark-seen', { friend: activeFriend });
 });
 
 document.addEventListener('visibilitychange', () => {
@@ -2497,14 +3917,10 @@ function formatLastSeen(isoTime) {
   if (isNaN(d.getTime())) return 'offline';
   const now = new Date();
   const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  if (d.toDateString() === now.toDateString()) {
-    return `last seen today at ${timeStr}`;
-  }
+  if (d.toDateString() === now.toDateString()) return `last seen today at ${timeStr}`;
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
-  if (d.toDateString() === yesterday.toDateString()) {
-    return `last seen yesterday at ${timeStr}`;
-  }
+  if (d.toDateString() === yesterday.toDateString()) return `last seen yesterday at ${timeStr}`;
   return `last seen ${d.toLocaleDateString([], { day: 'numeric', month: 'short' })} at ${timeStr}`;
 }
 
@@ -2572,10 +3988,10 @@ function renderSocialLists() {
 function selectFriend(friendName) {
   activeFriend = friendName;
   emptyChatState.style.display = 'none';
-  messageInput.disabled = false;
-  sendBtn.disabled = false;
-  if (heartShowerBtn) heartShowerBtn.disabled = false;
-  messageInput.placeholder = `Message`;
+  [messageInput, sendBtn, heartShowerBtn, secretMsgBtn, photoAttachBtn, voiceRecordBtn].forEach(el => {
+    if (el) el.disabled = false;
+  });
+  messageInput.placeholder = isSecretMode ? '💌 Secret scratch message...' : 'Message';
 
   clearReplyPreview();
   updateActiveFriendHeader();
@@ -2583,6 +3999,8 @@ function selectFriend(friendName) {
   renderMindSync();
   renderRps();
   renderCatchGame();
+  renderBombGame();
+  renderLikelyGame();
   renderSocialLists();
   if (socket) socket.emit('load-private-chat', { friend: friendName });
 }
@@ -2603,13 +4021,17 @@ function updateActiveFriendHeader() {
 }
 
 function setReplyPreview(msg) {
+  const previewText = msg.msg_type === 'secret'
+    ? '💌 Secret message'
+    : (msg.msg_type === 'voice' ? '🎙️ Voice note' : (msg.msg_type === 'view_once' ? '🔥 View-once photo' : msg.text));
+
   replyingToMessage = {
     id: msg.id,
     username: msg.username,
-    text: msg.text
+    text: previewText
   };
   replyPreviewUser.textContent = msg.username.toLowerCase() === currentUser.toLowerCase() ? 'You' : msg.username;
-  replyPreviewText.textContent = msg.text;
+  replyPreviewText.textContent = previewText;
   replyPreviewBar.style.display = 'flex';
   messageInput.focus();
   setTimeout(scrollToBottom, 80);
@@ -2630,6 +4052,9 @@ messageInput.addEventListener('focus', () => {
 messageInput.addEventListener('input', () => {
   if (!activeFriend || !socket) return;
   socket.emit('typing', { to: activeFriend });
+  if (chaosModeEnabled) {
+    socket.emit('chaos-draft', { to: activeFriend, text: messageInput.value });
+  }
   clearTimeout(typingTimeout);
   typingTimeout = setTimeout(() => {
     if (socket && activeFriend) socket.emit('stop-typing', { to: activeFriend });
@@ -2653,10 +4078,19 @@ chatForm.addEventListener('submit', (e) => {
   socket.emit('private-message', {
     to: activeFriend,
     text,
-    replyTo: replyingToMessage
+    replyTo: replyingToMessage,
+    isSecret: isSecretMode
   });
   socket.emit('stop-typing', { to: activeFriend });
+  if (chaosModeEnabled) {
+    socket.emit('chaos-draft', { to: activeFriend, text: '' });
+  }
   messageInput.value = '';
+  if (isSecretMode) {
+    isSecretMode = false;
+    if (secretMsgBtn) secretMsgBtn.classList.remove('active-secret');
+    messageInput.placeholder = 'Message';
+  }
   clearReplyPreview();
   messageInput.focus();
 });
@@ -2710,12 +4144,42 @@ function appendMessage(msg) {
        </div>`
     : '';
 
+  const msgType = msg.msg_type || 'text';
+  let contentHTML = '';
+
+  if (msgType === 'secret') {
+    contentHTML = `
+      <div class="secret-msg-box" title="Tap or scratch to reveal">
+        <span class="secret-text-content">${escapeHTML(msg.text)}</span>
+        <span class="secret-cover">✨ Tap / Scratch 💌</span>
+      </div>
+    `;
+  } else if (msgType === 'voice' && msg.media_id) {
+    const src = getMediaStreamUrl(msg.media_id);
+    contentHTML = `<audio class="voice-msg-audio" controls preload="metadata" src="${src}"></audio>`;
+  } else if (msgType === 'photo' && msg.media_id) {
+    const src = getMediaStreamUrl(msg.media_id);
+    const showCap = msg.text && msg.text !== 'Photo';
+    contentHTML = `
+      <img class="chat-photo-thumb" src="${src}" alt="Photo" loading="lazy" />
+      ${showCap ? `<span class="chat-photo-caption">${escapeHTML(msg.text)}</span>` : ''}
+    `;
+  } else if (msgType === 'view_once' && msg.media_id) {
+    if (msg.media_viewed) {
+      contentHTML = `<button type="button" class="view-once-btn opened" data-media-id="${escapeHTML(msg.media_id)}" disabled><span>💨</span> <span>Opened</span></button>`;
+    } else {
+      contentHTML = `<button type="button" class="view-once-btn" data-media-id="${escapeHTML(msg.media_id)}"><span>🔥</span> <span>View-Once Photo</span></button>`;
+    }
+  } else {
+    contentHTML = `<span class="msg-text">${escapeHTML(msg.text)}</span>`;
+  }
+
   li.innerHTML = `
     <div class="msg-bubble-wrap">
       <div class="msg-bubble">
         ${quotedHTML}
         <div class="msg-line">
-          <span class="msg-text">${escapeHTML(msg.text)}</span>
+          ${contentHTML}
           <span class="msg-inline-meta">
             <span>${time}</span>
             ${seenHTML}
@@ -2733,6 +4197,26 @@ function appendMessage(msg) {
 
   const bubbleEl = li.querySelector('.msg-bubble');
 
+  // Interactive Secret Scratch Reveal
+  const secretBox = li.querySelector('.secret-msg-box');
+  if (secretBox) {
+    const revealSecret = () => secretBox.classList.add('revealed');
+    secretBox.addEventListener('click', revealSecret);
+    secretBox.addEventListener('pointermove', (e) => {
+      if (e.buttons === 1 || e.pointerType === 'touch') revealSecret();
+    });
+  }
+
+  const photoThumb = li.querySelector('.chat-photo-thumb');
+  if (photoThumb && msg.media_id) {
+    photoThumb.addEventListener('click', () => openPhotoLightbox(msg.media_id, msg.text, false));
+  }
+
+  const viewOnceBtn = li.querySelector('.view-once-btn');
+  if (viewOnceBtn && msg.media_id && !msg.media_viewed) {
+    viewOnceBtn.addEventListener('click', () => openPhotoLightbox(msg.media_id, msg.text, true));
+  }
+
   const triggerReaction = () => {
     if (!socket || !activeFriend) return;
     const burst = document.createElement('span');
@@ -2744,8 +4228,12 @@ function appendMessage(msg) {
   };
 
   let lastTapAt = 0;
-  bubbleEl.addEventListener('dblclick', triggerReaction);
-  bubbleEl.addEventListener('touchend', () => {
+  bubbleEl.addEventListener('dblclick', (e) => {
+    if (e.target.closest('audio, img, button, .secret-msg-box')) return;
+    triggerReaction();
+  });
+  bubbleEl.addEventListener('touchend', (e) => {
+    if (e.target.closest('audio, img, button, .secret-msg-box')) return;
     const now = Date.now();
     if (now - lastTapAt > 0 && now - lastTapAt < 300) {
       lastTapAt = 0;
